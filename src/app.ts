@@ -29,6 +29,9 @@ export function createApp() {
         if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
           return callback(null, true);
         }
+        if (/\.vercel\.app\/?$/.test(origin) || /^https:\/\/groceries-admin-xi\.vercel\.app\/?$/.test(origin)) {
+          return callback(null, true);
+        }
         callback(new Error('Not allowed by CORS'));
       },
       credentials: true,
