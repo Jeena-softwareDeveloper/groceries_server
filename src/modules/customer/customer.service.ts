@@ -85,7 +85,7 @@ export async function getHomeFeed(districtIdInput: string, areaId?: string) {
       select: { id: true, shopName: true, slug: true, logoUrl: true, bannerUrl: true, rating: true, minOrderValue: true },
     }),
     prisma.product.findMany({
-      where: { status: 'PUBLISHED', vendor: { districtId, status: 'APPROVED' } },
+      where: { status: { in: ['APPROVED', 'PUBLISHED'] }, vendor: { districtId, status: 'APPROVED' } },
       include: { images: { where: { isPrimary: true }, take: 1 }, vendor: { select: { shopName: true } } },
       orderBy: { createdAt: 'desc' },
       take: 12,

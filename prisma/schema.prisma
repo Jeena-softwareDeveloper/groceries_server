@@ -171,23 +171,32 @@ model Category {
 // ─── Products ──────────────────────────────────────────────────────────────────
 
 model Product {
-  id            String        @id @default(cuid())
-  vendorId      String
-  categoryId    String
-  subCategoryId String?
-  name          String
-  slug          String
-  description   String?
-  brand         String?
-  mrp           Decimal       
-  sellingPrice  Decimal       
-  unit          String
-  weight        String?
-  tags String?
-  status String @default("DRAFT")
-  isActive      Boolean       @default(true)
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id              String        @id @default(cuid())
+  vendorId        String
+  categoryId      String
+  subCategoryId   String?
+  name            String
+  slug            String
+  description     String?
+  brand           String?
+  sku             String?
+  barcode         String?
+  mrp             Decimal       
+  sellingPrice    Decimal       
+  unit            String
+  weight          String?
+  weightGrams     Float?
+  hsnCode         String?
+  taxPct          Decimal       @default(0)
+  commissionPct   Decimal       @default(5)
+  marginPct       Decimal       @default(0)
+  tags            String?
+  status          String        @default("PENDING_APPROVAL")
+  rejectionReason String?
+  adminNotes      String?
+  isActive        Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   vendor      Vendor         @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   category    Category       @relation("ProductCategory", fields: [categoryId], references: [id])
@@ -204,6 +213,7 @@ model Product {
   @@index([vendorId])
   @@index([categoryId])
   @@index([status])
+  @@index([sku])
 }
 
 model ProductApproval {
@@ -720,3 +730,80 @@ model RefreshToken {
 
   @@index([userId])
 }
+
+// ─── Immutable Audit Logging ───────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorType  String   // SUPER_ADMIN | VENDOR | CUSTOMER | SYSTEM
+  actorId    String?
+  actorName  String?
+  action     String   // e.g., PRODUCT_SUBMITTED, PRODUCT_APPROVED, ORDER_PLACED, ORDER_STATUS_UPDATED
+  entityType String   // PRODUCT, ORDER, SETTLEMENT, VENDOR, USER
+  entityId   String
+  details    Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ─── Vendor Settlement & Wallet Ledger ─────────────────────────────────────
+
+model VendorSettlement {
+  id               String   @id @default(cuid())
+  vendorId         String
+  settlementNo     String   @unique
+  periodStart      DateTime
+  periodEnd        DateTime
+  totalOrders      Int      @default(0)
+  grossAmount      Decimal  @default(0)
+  commissionAmount Decimal  @default(0)
+  gstAmount        Decimal  @default(0)
+  platformFee      Decimal  @default(0)
+  netAmount        Decimal  @default(0)
+  status           String   @default("PENDING") // PENDING | APPROVED | REJECTED | PAID
+  bankReference    String?
+  rejectionReason  String?
+  approvedBy       String?
+  approvedAt       DateTime?
+  paidAt           DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  transactions VendorWalletTransaction[]
+
+  @@index([vendorId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model VendorWallet {
+  id          String   @id @default(cuid())
+  vendorId    String   @unique
+  balance     Decimal  @default(0)
+  totalEarned Decimal  @default(0)
+  updatedAt   DateTime @updatedAt
+}
+
+model VendorWalletTransaction {
+  id           String            @id @default(cuid())
+  vendorId     String
+  settlementId String?
+  type         String            // CREDIT | DEBIT | WITHDRAWAL
+  amount       Decimal
+  balanceAfter Decimal
+  description  String
+  reference    String?
+  createdAt    DateTime          @default(now())
+
+  settlement VendorSettlement? @relation(fields: [settlementId], references: [id])
+
+  @@index([vendorId])
+  @@index([settlementId])
+  @@index([createdAt])
+}
+

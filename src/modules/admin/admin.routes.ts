@@ -9,6 +9,8 @@ import { marketingRoutes } from './marketing/marketing.routes.js';
 import { analyticsRoutes, customersAdminRoutes, notificationsAdminRoutes, staticPagesRoutes } from './analytics/analytics.routes.js';
 import { vendorRequestAdminRoutes } from '../vendor-request/vendor-request.admin.routes.js';
 import { productApprovalAdminRoutes, offerApprovalAdminRoutes } from './product-approvals/product-approval.routes.js';
+import { settlementAdminRoutes } from './settlements/settlement.routes.js';
+import { auditAdminRoutes } from './audit/audit.routes.js';
 
 import { dashboardRoutes } from './dashboard/dashboard.routes.js';
 
@@ -31,4 +33,7 @@ adminRoutes.use('/pages', staticPagesRoutes);
 adminRoutes.use('/vendor-requests', vendorRequestAdminRoutes);
 adminRoutes.use('/product-approvals', productApprovalAdminRoutes);
 adminRoutes.use('/offer-approvals', offerApprovalAdminRoutes);
+adminRoutes.use('/settlements', settlementAdminRoutes);
+adminRoutes.use('/audit-logs', auditAdminRoutes);
+
 
