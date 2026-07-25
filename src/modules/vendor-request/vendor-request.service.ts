@@ -46,7 +46,7 @@ export async function submitApplication(customerId: string) {
   });
   if (!request) throw new NotFoundError('No draft application found');
   // Basic validation — required fields
-  const required = ['shopName', 'ownerName', 'mobileNumber', 'districtId', 'areaId', 'address'];
+  const required = ['shopName', 'ownerName', 'mobileNumber', 'districtId', 'address'];
   const missing = required.filter((k) => !request[k as keyof typeof request]);
   if (missing.length) throw new AppError('VALIDATION_ERROR', `Missing required fields: ${missing.join(', ')}`, 422);
 
@@ -108,7 +108,17 @@ export async function approveRequest(id: string, adminId: string) {
   }
 
   // Find area with district
-  const area = await prisma.area.findUnique({ where: { id: req.areaId ?? '' }, include: { district: true } });
+  let targetAreaId = req.areaId;
+  if (!targetAreaId) {
+    let fallbackArea = await prisma.area.findFirst({ where: { districtId: req.districtId ?? '' } });
+    if (!fallbackArea) {
+      fallbackArea = await prisma.area.create({
+        data: { name: 'Main Area', districtId: req.districtId ?? '', isActive: true }
+      });
+    }
+    targetAreaId = fallbackArea.id;
+  }
+  const area = await prisma.area.findUnique({ where: { id: targetAreaId }, include: { district: true } });
   if (!area) throw new AppError('BAD_REQUEST', 'Area not found for this request', 400);
 
   // Create the Vendor account
