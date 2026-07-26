@@ -3,7 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  // provider = "sqlite"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -88,6 +89,7 @@ model Vendor {
   email           String       @unique
   passwordHash    String
   shopName        String
+  code            String?      @unique
   slug            String       @unique
   description     String?
   logoUrl         String?
@@ -725,8 +727,13 @@ model RefreshToken {
   token     String   @unique
   userId    String
   userRole  String
-  expiresAt DateTime
-  createdAt DateTime @default(now())
+  expiresAt   DateTime
+  deviceName  String?
+  deviceId    String?
+  deviceModel String?
+  osVersion   String?
+  ipAddress   String?
+  createdAt  DateTime @default(now())
 
   @@index([userId])
 }

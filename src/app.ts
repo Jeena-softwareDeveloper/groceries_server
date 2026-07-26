@@ -13,6 +13,7 @@ import { uploadRoutes } from './modules/upload/upload.routes.js';
 import { adminRoutes } from './modules/admin/admin.routes.js';
 import { vendorRoutes } from './modules/vendor/vendor.routes.js';
 import { customerRoutes } from './modules/customer/customer.routes.js';
+import { configRoutes } from './modules/config/config.routes.js';
 import { sendError } from './utils/response.js';
 import { swaggerSpec } from './docs/swagger.js';
 
@@ -49,6 +50,7 @@ export function createApp() {
   app.use('/api/v1/admin', adminRoutes);
   app.use('/api/v1/vendor', vendorRoutes);
   app.use('/api/v1/customer', customerRoutes);
+  app.use('/api/v1/config', configRoutes);
 
   app.use((_req, res) => {
     sendError(res, 'NOT_FOUND', 'Route not found', 404);

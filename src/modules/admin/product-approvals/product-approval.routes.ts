@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { sendSuccess } from '../../../utils/response.js';
 import { paramId } from '../../../utils/params.js';
 import * as svc from '../../vendor/vendor.service.js';
+import { rejectProductApprovalSchema, requestChangesSchema, adminUpdateProductSchema } from '../admin.schemas.js';
 import type { Request, Response, NextFunction } from 'express';
 
 export const productApprovalAdminRoutes = Router();
@@ -25,15 +26,29 @@ productApprovalAdminRoutes.post('/:id/approve', async (req: Request, res: Respon
 
 productApprovalAdminRoutes.post('/:id/reject', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { reason } = req.body;
-    sendSuccess(res, await svc.rejectProductApproval(paramId(req), req.user!.sub, reason ?? 'Not approved'));
+    const { reason } = rejectProductApprovalSchema.parse(req.body);
+    sendSuccess(res, await svc.rejectProductApproval(paramId(req), req.user!.sub, reason));
   } catch (e) { next(e); }
 });
 
 productApprovalAdminRoutes.post('/:id/request-changes', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { notes } = req.body;
-    sendSuccess(res, await svc.requestProductChanges(paramId(req), req.user!.sub, notes ?? ''));
+    const { notes } = requestChangesSchema.parse(req.body);
+    sendSuccess(res, await svc.requestProductChanges(paramId(req), req.user!.sub, notes));
+  } catch (e) { next(e); }
+});
+
+productApprovalAdminRoutes.put('/products/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const data = adminUpdateProductSchema.parse(req.body);
+    sendSuccess(res, await svc.adminUpdateProduct(paramId(req), data));
+  } catch (e) { next(e); }
+});
+
+productApprovalAdminRoutes.delete('/products/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await svc.adminDeleteProduct(paramId(req));
+    sendSuccess(res, { deleted: true });
   } catch (e) { next(e); }
 });
 

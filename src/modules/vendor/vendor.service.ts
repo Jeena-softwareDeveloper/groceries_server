@@ -4,6 +4,8 @@ import { ForbiddenError, NotFoundError, ValidationError } from '../../utils/erro
 
 // ─── Profile ─────────────────────────────────────────────────────────────────
 
+import type { ProductInput, OfferInput, VendorProfileUpdate } from './vendor.schemas.js';
+
 export async function getVendorProfile(vendorId: string) {
   const vendor = await prisma.vendor.findUnique({
     where: { id: vendorId },
@@ -13,7 +15,7 @@ export async function getVendorProfile(vendorId: string) {
   return vendor;
 }
 
-export async function updateVendorProfile(vendorId: string, data: Record<string, unknown>) {
+export async function updateVendorProfile(vendorId: string, data: VendorProfileUpdate) {
   const allowed = ['shopName', 'description', 'logoUrl', 'bannerUrl', 'address', 'phone', 'minOrderValue', 'deliveryRadius', 'isOpen', 'operatingHours'];
   const filtered = Object.fromEntries(Object.entries(data).filter(([k]) => allowed.includes(k)));
   return prisma.vendor.update({ where: { id: vendorId }, data: filtered });
@@ -174,7 +176,7 @@ export async function listVendorProducts(vendorId: string, page = 1, limit = 20,
       skip,
       take: limit,
       include: {
-        images: { where: { isPrimary: true }, take: 1 },
+        images: { orderBy: { sortOrder: 'asc' } },
         inventory: true,
         category: { select: { id: true, name: true } },
         approvals: { orderBy: { createdAt: 'desc' }, take: 1 },
@@ -186,24 +188,32 @@ export async function listVendorProducts(vendorId: string, page = 1, limit = 20,
   return { items, total, page, limit };
 }
 
-export async function createProduct(vendorId: string, data: Record<string, unknown>) {
-  const { categoryId, subCategoryId, name, slug, description, brand, mrp, sellingPrice, unit, weight, tags, stock } = data as {
-    categoryId: string; subCategoryId?: string; name: string; slug: string; description?: string;
-    brand?: string; mrp: number; sellingPrice: number; unit: string; weight?: string; tags?: string[]; stock?: number;
-  };
+export async function createProduct(vendorId: string, data: ProductInput) {
+  const { categoryId, subCategoryId, name, description, brand, mrp, sellingPrice, unit, weight, tags, stock, images } = data;
   const category = await prisma.category.findUnique({ where: { id: categoryId } });
   if (!category) throw new ValidationError('Category not found — vendors cannot create categories');
   if (subCategoryId) {
     const sub = await prisma.category.findFirst({ where: { id: subCategoryId, parentId: categoryId } });
     if (!sub) throw new ValidationError('Invalid subcategory');
   }
+
+  const vendor = await prisma.vendor.findUnique({ where: { id: vendorId }, select: { code: true } });
+  const vendorPrefix = vendor?.code ? vendor.code.split('-')[1] || 'VND' : 'VND';
+  const sku = `ATM-${vendorPrefix}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+
   const product = await prisma.product.create({
     data: {
-      vendorId, categoryId, subCategoryId, name, slug, description, brand,
-      mrp, sellingPrice, unit, weight,
+      vendorId, categoryId, 
+      subCategoryId: subCategoryId || null, 
+      name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, ''), sku,
+      description: description || null, 
+      brand: brand || null,
+      mrp, sellingPrice, unit, 
+      weight: weight || null,
       status: 'DRAFT',
       tags: Array.isArray(tags) ? tags.join(',') : (typeof tags === 'string' ? tags : null),
       inventory: { create: { stock: stock ?? 0 } },
+      ...(images?.length ? { images: { create: images.map((img, i) => ({ url: img, isPrimary: i === 0, sortOrder: i })) } } : {}),
     },
     include: { inventory: true, category: true, images: true },
   });
@@ -211,7 +221,7 @@ export async function createProduct(vendorId: string, data: Record<string, unkno
   return product;
 }
 
-export async function updateProduct(vendorId: string, productId: string, data: Record<string, unknown>) {
+export async function updateProduct(vendorId: string, productId: string, data: Partial<ProductInput>) {
   const product = await prisma.product.findFirst({ where: { id: productId, vendorId } });
   if (!product) throw new NotFoundError('Product not found');
   if (data.categoryId && data.categoryId !== product.categoryId) {
@@ -220,11 +230,16 @@ export async function updateProduct(vendorId: string, productId: string, data: R
   }
 
   // Allow stock update inline
-  const { stock, ...productData } = data as any;
+  const { stock, images, ...productData } = data as any;
 
-  // Strip protected fields
-  const protectedFields = ['id', 'vendorId', 'createdAt', 'updatedAt', 'status'];
+  // Strip protected fields and relations
+  const protectedFields = ['id', 'vendorId', 'createdAt', 'updatedAt', 'status', 'images', 'stock', 'sku'];
   protectedFields.forEach((f) => delete productData[f]);
+
+  if (productData.subCategoryId === '') productData.subCategoryId = null;
+  if (productData.description === '') productData.description = null;
+  if (productData.brand === '') productData.brand = null;
+  if (productData.weight === '') productData.weight = null;
 
   const updated = await prisma.product.update({
     where: { id: productId },
@@ -240,6 +255,20 @@ export async function updateProduct(vendorId: string, productId: string, data: R
     });
   }
 
+  if (images && Array.isArray(images)) {
+    await prisma.productImage.deleteMany({ where: { productId } });
+    if (images.length > 0) {
+      await prisma.productImage.createMany({
+        data: images.map((img: any, i) => ({
+          productId,
+          url: img.url,
+          isPrimary: img.isPrimary,
+          sortOrder: i,
+        })),
+      });
+    }
+  }
+
   await invalidateVendorCache(vendorId);
   return updated;
 }
@@ -251,23 +280,25 @@ export async function submitProductForApproval(vendorId: string, productId: stri
     throw new ValidationError('Product is missing required fields (name, category, price, unit)');
   }
 
-  // Update product status to PENDING_REVIEW
-  await prisma.product.update({ where: { id: productId }, data: { status: 'PENDING_REVIEW' } });
+  return prisma.$transaction(async (tx) => {
+    // Update product status to PENDING_REVIEW
+    await tx.product.update({ where: { id: productId }, data: { status: 'PENDING_REVIEW' } });
 
-  // Create or update approval request
-  const existing = await prisma.productApproval.findFirst({
-    where: { productId, status: { in: ['PENDING', 'CHANGES_REQUESTED'] } },
-  });
-
-  if (existing) {
-    return prisma.productApproval.update({
-      where: { id: existing.id },
-      data: { status: 'PENDING', rejectionReason: null, adminNotes: null, reviewedAt: null, reviewedBy: null },
+    // Create or update approval request
+    const existing = await tx.productApproval.findFirst({
+      where: { productId, status: { in: ['PENDING', 'CHANGES_REQUESTED'] } },
     });
-  }
 
-  return prisma.productApproval.create({
-    data: { productId, vendorId, status: 'PENDING' },
+    if (existing) {
+      return tx.productApproval.update({
+        where: { id: existing.id },
+        data: { status: 'PENDING', rejectionReason: null, adminNotes: null, reviewedAt: null, reviewedBy: null },
+      });
+    }
+
+    return tx.productApproval.create({
+      data: { productId, vendorId, status: 'PENDING' },
+    });
   });
 }
 
@@ -284,6 +315,48 @@ export async function deleteProduct(vendorId: string, productId: string) {
   if (!product) throw new NotFoundError('Product not found');
   await prisma.product.delete({ where: { id: productId } });
   await invalidateVendorCache(vendorId);
+}
+
+export async function adminUpdateProduct(productId: string, data: Partial<ProductInput>) {
+  const product = await prisma.product.findUnique({ where: { id: productId } });
+  if (!product) throw new NotFoundError('Product not found');
+  if (data.categoryId && data.categoryId !== product.categoryId) {
+    const cat = await prisma.category.findUnique({ where: { id: data.categoryId } });
+    if (!cat) throw new ValidationError('Category not found');
+  }
+
+  const { stock, images, ...productData } = data;
+  const protectedFields = ['id', 'vendorId', 'createdAt', 'updatedAt', 'images', 'stock'];
+  protectedFields.forEach((f) => delete (productData as any)[f]);
+
+  if (productData.subCategoryId === '') productData.subCategoryId = null;
+  if (productData.description === '') productData.description = null;
+  if (productData.brand === '') productData.brand = null;
+  if (productData.weight === '') productData.weight = null;
+
+  const updated = await prisma.product.update({
+    where: { id: productId },
+    data: { ...productData }, // Admin edits do not change the status back to DRAFT
+    include: { inventory: true, images: true },
+  });
+
+  if (stock !== undefined) {
+    await prisma.inventory.upsert({
+      where: { productId },
+      create: { productId, stock: Number(stock) },
+      update: { stock: Number(stock) },
+    });
+  }
+
+  await invalidateVendorCache(product.vendorId);
+  return updated;
+}
+
+export async function adminDeleteProduct(productId: string) {
+  const product = await prisma.product.findUnique({ where: { id: productId } });
+  if (!product) throw new NotFoundError('Product not found');
+  await prisma.product.delete({ where: { id: productId } });
+  await invalidateVendorCache(product.vendorId);
 }
 
 // ─── Inventory ────────────────────────────────────────────────────────────────
@@ -362,7 +435,7 @@ export async function updateOrderStatus(vendorId: string, orderId: string, statu
   return prisma.order.update({
     where: { id: orderId },
     data: {
-      status: status as any,
+      status: status as 'PLACED' | 'CONFIRMED' | 'PACKED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED' | 'RETURNED',
       ...(status === 'DELIVERED' ? { deliveredAt: new Date() } : {}),
       ...(status === 'CANCELLED' ? { cancelledAt: new Date() } : {}),
     },
@@ -487,8 +560,8 @@ export async function listVendorOffers(vendorId: string) {
   return prisma.offer.findMany({ where: { vendorId }, orderBy: { createdAt: 'desc' } });
 }
 
-export async function createVendorOffer(vendorId: string, data: Record<string, unknown>) {
-  const { title, description, discountPct, discountAmt, minOrder, startsAt, endsAt } = data as any;
+export async function createVendorOffer(vendorId: string, data: OfferInput) {
+  const { title, description, discountPct, discountAmt, minOrder, startsAt, endsAt } = data;
   return prisma.offer.create({
     data: {
       title,
@@ -504,6 +577,12 @@ export async function createVendorOffer(vendorId: string, data: Record<string, u
       approvalStatus: 'PENDING',
     },
   });
+}
+
+export async function updateVendorOffer(vendorId: string, offerId: string, data: Partial<OfferInput>) {
+  const offer = await prisma.offer.findUnique({ where: { id: offerId, vendorId } });
+  if (!offer) throw new NotFoundError('Offer not found');
+  return prisma.offer.update({ where: { id: offerId }, data: data as any });
 }
 
 export async function deleteVendorOffer(vendorId: string, offerId: string) {
@@ -526,10 +605,10 @@ export async function listProductApprovals(status?: string, page = 1, limit = 20
       include: {
         product: {
           include: {
-            images: { where: { isPrimary: true }, take: 1 },
+            images: true,
             category: { select: { id: true, name: true } },
             inventory: true,
-            vendor: { select: { id: true, shopName: true, email: true, phone: true, status: true, rating: true } },
+            vendor: { select: { id: true, shopName: true, email: true, phone: true, status: true, rating: true, code: true, logoUrl: true } },
           },
         },
       },
@@ -544,50 +623,56 @@ export async function approveProductApproval(approvalId: string, adminId: string
   if (!approval) throw new NotFoundError('Approval request not found');
   if (approval.status !== 'PENDING') throw new ValidationError('Only PENDING approvals can be approved');
 
-  await prisma.productApproval.update({
-    where: { id: approvalId },
-    data: { status: 'APPROVED', reviewedBy: adminId, reviewedAt: new Date() },
+  return prisma.$transaction(async (tx) => {
+    const updatedApproval = await tx.productApproval.update({
+      where: { id: approvalId },
+      data: { status: 'APPROVED', reviewedBy: adminId, reviewedAt: new Date() },
+    });
+
+    await tx.product.update({ where: { id: approval.productId }, data: { status: 'PUBLISHED' } });
+    
+    // Notify vendor
+    await tx.notification.create({
+      data: {
+        vendorId: approval.vendorId,
+        type: 'PRODUCT_APPROVED',
+        title: '✅ Product Approved',
+        body: 'Your product has been approved and is now visible to customers.',
+        data: { productId: approval.productId },
+      },
+    });
+    
+    return updatedApproval;
+  }).then(async (res) => {
+    await cacheDelPattern('home:feed:*');
+    return res;
   });
-
-  await prisma.product.update({ where: { id: approval.productId }, data: { status: 'PUBLISHED' } });
-  await cacheDelPattern('home:feed:*');
-
-  // Notify vendor
-  await prisma.notification.create({
-    data: {
-      vendorId: approval.vendorId,
-      type: 'PRODUCT_APPROVED',
-      title: '✅ Product Approved',
-      body: 'Your product has been approved and is now visible to customers.',
-      data: { productId: approval.productId },
-    },
-  });
-
-  return approval;
 }
 
 export async function rejectProductApproval(approvalId: string, adminId: string, reason: string) {
   const approval = await prisma.productApproval.findUnique({ where: { id: approvalId } });
   if (!approval) throw new NotFoundError('Approval request not found');
 
-  await prisma.productApproval.update({
-    where: { id: approvalId },
-    data: { status: 'REJECTED', rejectionReason: reason, reviewedBy: adminId, reviewedAt: new Date() },
+  return prisma.$transaction(async (tx) => {
+    const updatedApproval = await tx.productApproval.update({
+      where: { id: approvalId },
+      data: { status: 'REJECTED', rejectionReason: reason, reviewedBy: adminId, reviewedAt: new Date() },
+    });
+
+    await tx.product.update({ where: { id: approval.productId }, data: { status: 'DRAFT' } });
+
+    await tx.notification.create({
+      data: {
+        vendorId: approval.vendorId,
+        type: 'PRODUCT_REJECTED',
+        title: '❌ Product Rejected',
+        body: `Your product was rejected. Reason: ${reason}`,
+        data: { productId: approval.productId },
+      },
+    });
+
+    return updatedApproval;
   });
-
-  await prisma.product.update({ where: { id: approval.productId }, data: { status: 'DRAFT' } });
-
-  await prisma.notification.create({
-    data: {
-      vendorId: approval.vendorId,
-      type: 'PRODUCT_REJECTED',
-      title: '❌ Product Not Approved',
-      body: `Your product was rejected. Reason: ${reason}`,
-      data: { productId: approval.productId },
-    },
-  });
-
-  return approval;
 }
 
 export async function requestProductChanges(approvalId: string, adminId: string, notes: string) {

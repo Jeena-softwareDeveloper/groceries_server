@@ -3,6 +3,8 @@ import { prisma } from '../../../lib/prisma.js';
 const DEFAULT_SETTINGS: Record<string, unknown> = {
   minOrderValue: 99,
   taxPercent: 5,
+  platformFee: 5,
+  deliveryFee: 0,
   supportEmail: 'support@districtmart.com',
   supportPhone: '+910000000000',
   featureFlags: { wallet: false, cod: true },

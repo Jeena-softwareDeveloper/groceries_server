@@ -85,8 +85,17 @@ export async function getHomeFeed(districtIdInput: string, areaId?: string) {
       select: { id: true, shopName: true, slug: true, logoUrl: true, bannerUrl: true, rating: true, minOrderValue: true },
     }),
     prisma.product.findMany({
-      where: { status: { in: ['APPROVED', 'PUBLISHED'] }, vendor: { districtId, status: 'APPROVED' } },
-      include: { images: { where: { isPrimary: true }, take: 1 }, vendor: { select: { shopName: true } } },
+      where: { status: 'PUBLISHED', isActive: true, vendor: { districtId, status: 'APPROVED' } },
+      select: {
+        id: true,
+        name: true,
+        mrp: true,
+        sellingPrice: true,
+        unit: true,
+        weight: true,
+        images: { where: { isPrimary: true }, take: 1, select: { url: true } },
+        vendor: { select: { shopName: true } }
+      },
       orderBy: { createdAt: 'desc' },
       take: 12,
     }),
@@ -119,7 +128,16 @@ export async function listPublicAreas(districtId: string) {
 export async function listCategories() {
   return prisma.category.findMany({
     where: { parentId: null, isActive: true },
-    include: { children: { where: { isActive: true }, orderBy: { sortOrder: 'asc' } } },
+    select: {
+      id: true,
+      name: true,
+      imageUrl: true,
+      children: { 
+        where: { isActive: true }, 
+        orderBy: { sortOrder: 'asc' },
+        select: { id: true, name: true, imageUrl: true, parentId: true }
+      }
+    },
     orderBy: { sortOrder: 'asc' },
   });
 }
@@ -131,7 +149,16 @@ export async function listShops(districtIdInput: string, areaId?: string, catego
       ...(areaId ? { areaId } : {}),
       ...(categoryId ? { products: { some: { categoryId, status: 'PUBLISHED' } } } : {}),
     },
-    include: { area: true },
+    select: {
+      id: true,
+      shopName: true,
+      logoUrl: true,
+      bannerUrl: true,
+      rating: true,
+      minOrderValue: true,
+      address: true,
+      area: { select: { name: true } },
+    },
     orderBy: { rating: 'desc' },
   });
 }
@@ -139,7 +166,19 @@ export async function listShops(districtIdInput: string, areaId?: string, catego
 export async function getShop(vendorId: string) {
   const vendor = await prisma.vendor.findFirst({
     where: { id: vendorId, status: 'APPROVED' },
-    include: { area: { include: { district: true } } },
+    select: {
+      id: true,
+      shopName: true,
+      logoUrl: true,
+      bannerUrl: true,
+      rating: true,
+      minOrderValue: true,
+      address: true,
+      fssaiNumber: true,
+      isOpen: true,
+      districtId: true,
+      area: { select: { name: true, district: { select: { name: true } } } },
+    },
   });
   if (!vendor) throw new NotFoundError('Shop not found');
   return vendor;
@@ -147,19 +186,74 @@ export async function getShop(vendorId: string) {
 
 export async function getShopProducts(vendorId: string, categoryId?: string) {
   return prisma.product.findMany({
-    where: { vendorId, status: 'PUBLISHED', ...(categoryId ? { categoryId } : {}) },
-    include: { images: true, inventory: true, category: true },
+    where: { vendorId, status: 'PUBLISHED', isActive: true, ...(categoryId ? { categoryId } : {}) },
+    select: {
+      id: true,
+      name: true,
+      mrp: true,
+      sellingPrice: true,
+      unit: true,
+      weight: true,
+      images: { take: 1, select: { url: true } },
+      inventory: { select: { stock: true } },
+      category: { select: { name: true } }
+    },
     orderBy: { name: 'asc' },
   });
 }
 
-export async function getProduct(productId: string) {
-  const product = await prisma.product.findFirst({
-    where: { id: productId, status: 'PUBLISHED' },
-    include: { images: true, inventory: true, category: true, subCategory: true, vendor: { select: { id: true, shopName: true, slug: true } }, reviews: { where: { isVisible: true }, take: 10 } },
+export async function getProduct(productId: string, user?: { role: string; sub: string }) {
+  const product = await prisma.product.findUnique({
+    where: { id: productId },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      brand: true,
+      sellingPrice: true,
+      mrp: true,
+      unit: true,
+      weight: true,
+      tags: true,
+      status: true,
+      vendorId: true,
+      categoryId: true,
+      images: { select: { url: true, isPrimary: true } },
+      inventory: { select: { stock: true } },
+      category: { select: { name: true } },
+      subCategory: { select: { name: true } },
+      vendor: { select: { id: true, shopName: true, slug: true } },
+      reviews: { where: { isVisible: true }, take: 10, select: { rating: true, comment: true, createdAt: true, customer: { select: { name: true } } } }
+    }
   });
   if (!product) throw new NotFoundError('Product not found');
-  return product;
+
+  if (product.status !== 'PUBLISHED') {
+    if (user?.role !== 'VENDOR' || user.sub !== product.vendorId) {
+      throw new NotFoundError('Product not found');
+    }
+  }
+
+  const relatedProducts = await prisma.product.findMany({
+    where: { 
+      categoryId: product.categoryId, 
+      id: { not: productId },
+      status: 'PUBLISHED'
+    },
+    take: 6,
+    select: {
+      id: true,
+      name: true,
+      mrp: true,
+      sellingPrice: true,
+      unit: true,
+      weight: true,
+      images: { take: 1, select: { url: true } },
+      vendor: { select: { shopName: true } }
+    }
+  });
+
+  return { ...product, relatedProducts };
 }
 
 // ─── Search ────────────────────────────────────────────────────────────────────
@@ -178,9 +272,35 @@ export async function search(q: string, districtIdInput?: string, scope?: string
   };
 
   const [products, shops, categories] = await Promise.all([
-    scope === 'shops' ? [] : prisma.product.findMany({ where: productWhere, take: 20, include: { images: { take: 1 }, vendor: { select: { shopName: true } } } }),
-    scope === 'products' ? [] : prisma.vendor.findMany({ where: { shopName: { contains: query }, status: 'APPROVED', ...(districtId ? { districtId } : {}) }, take: 10 }),
-    scope === 'products' || scope === 'shops' ? [] : prisma.category.findMany({ where: { name: { contains: query } }, take: 5 }),
+    scope === 'shops' ? [] : prisma.product.findMany({ 
+      where: productWhere, 
+      take: 20, 
+      select: {
+        id: true,
+        name: true,
+        mrp: true,
+        sellingPrice: true,
+        unit: true,
+        images: { take: 1, select: { url: true } },
+        vendor: { select: { shopName: true } }
+      }
+    }),
+    scope === 'products' ? [] : prisma.vendor.findMany({ 
+      where: { shopName: { contains: query }, status: 'APPROVED', ...(districtId ? { districtId } : {}) }, 
+      take: 10,
+      select: {
+        id: true,
+        shopName: true,
+        logoUrl: true,
+        rating: true,
+        area: { select: { name: true } }
+      }
+    }),
+    scope === 'products' || scope === 'shops' ? [] : prisma.category.findMany({ 
+      where: { name: { contains: query } }, 
+      take: 5,
+      select: { id: true, name: true, imageUrl: true }
+    }),
   ]);
   return { products, shops, categories };
 }
@@ -222,7 +342,25 @@ export async function clearRecentSearches(customerId: string) {
 export async function getCart(customerId: string) {
   const items = await prisma.cartItem.findMany({
     where: { customerId },
-    include: { product: { include: { images: { take: 1 }, inventory: true } }, vendor: { select: { id: true, shopName: true, minOrderValue: true, districtId: true } } },
+    select: {
+      id: true,
+      productId: true,
+      quantity: true,
+      vendorId: true,
+      vendor: { select: { id: true, shopName: true, minOrderValue: true, districtId: true } },
+      product: {
+        select: {
+          id: true,
+          name: true,
+          sellingPrice: true,
+          mrp: true,
+          unit: true,
+          weight: true,
+          images: { take: 1, select: { url: true } },
+          inventory: { select: { stock: true } }
+        }
+      }
+    }
   });
   const subtotal = items.reduce((s, i) => s + Number(i.product.sellingPrice) * i.quantity, 0);
   const couponCode = await getCartCouponCode(customerId);
@@ -427,14 +565,46 @@ export async function checkout(customerId: string, addressId: string, paymentMet
 export async function listCustomerOrders(customerId: string, page = 1, limit = 20) {
   const skip = (page - 1) * limit;
   const [items, total] = await Promise.all([
-    prisma.order.findMany({ where: { customerId }, skip, take: limit, include: { vendor: { select: { shopName: true } }, items: true }, orderBy: { createdAt: 'desc' } }),
+    prisma.order.findMany({ 
+      where: { customerId }, 
+      skip, 
+      take: limit, 
+      select: {
+        id: true,
+        orderNumber: true,
+        status: true,
+        grandTotal: true,
+        createdAt: true,
+        vendor: { select: { shopName: true } }, 
+        items: { select: { id: true, name: true, quantity: true, unitPrice: true, total: true } }
+      }, 
+      orderBy: { createdAt: 'desc' } 
+    }),
     prisma.order.count({ where: { customerId } }),
   ]);
   return { items, total, page, limit };
 }
 
 export async function getOrder(customerId: string, orderId: string) {
-  const order = await prisma.order.findFirst({ where: { id: orderId, customerId }, include: { items: true, vendor: true, address: true } });
+  const order = await prisma.order.findFirst({ 
+    where: { id: orderId, customerId }, 
+    select: {
+      id: true,
+      orderNumber: true,
+      status: true,
+      subtotal: true,
+      deliveryCharge: true,
+      tax: true,
+      discount: true,
+      grandTotal: true,
+      createdAt: true,
+      cancelReason: true,
+      cancelledAt: true,
+      vendor: { select: { shopName: true, logoUrl: true, address: true } },
+      address: { select: { label: true, line1: true, city: true, pincode: true } },
+      items: { select: { id: true, name: true, quantity: true, unitPrice: true, total: true, productId: true } }
+    } 
+  });
   if (!order) throw new NotFoundError('Order not found');
   return order;
 }
@@ -461,7 +631,18 @@ export async function cancelOrder(customerId: string, orderId: string, reason?: 
 }
 // ─── Profile & Addresses ───────────────────────────────────────────────────────
 export async function getProfile(customerId: string) {
-  return prisma.customer.findUnique({ where: { id: customerId }, include: { addresses: true, wallet: true } });
+  return prisma.customer.findUnique({ 
+    where: { id: customerId }, 
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
+      avatarUrl: true,
+      addresses: { select: { id: true, label: true, line1: true, city: true, pincode: true, isDefault: true } },
+      wallet: { select: { balance: true } }
+    } 
+  });
 }
 
 export async function updateProfile(customerId: string, data: { name?: string; email?: string }) {
@@ -490,9 +671,38 @@ export async function deleteAddress(customerId: string, addressId: string) {
   if (!existing) throw new NotFoundError('Address not found');
   await prisma.address.delete({ where: { id: addressId } });
 }
+
+export async function lookupPincode(pincode: string) {
+  try {
+    const res = await fetch(`https://api.postalpincode.in/pincode/${pincode}`);
+    const data = await res.json() as any[];
+    if (data && data[0] && data[0].Status === 'Success' && data[0].PostOffice?.length > 0) {
+      const po = data[0].PostOffice[0];
+      return { district: po.District, state: po.State };
+    }
+  } catch (err) {
+    // Fallback if API fails
+  }
+  return { district: 'Unknown', state: 'Tamil Nadu' };
+}
 // ─── Wishlist ──────────────────────────────────────────────────────────────────
 export async function getWishlist(customerId: string) {
-  return prisma.wishlist.findMany({ where: { customerId }, include: { product: { include: { images: { take: 1 } } } } });
+  return prisma.wishlist.findMany({ 
+    where: { customerId }, 
+    select: {
+      id: true,
+      productId: true,
+      product: { 
+        select: { 
+          id: true, 
+          name: true, 
+          sellingPrice: true, 
+          mrp: true, 
+          images: { take: 1, select: { url: true } } 
+        } 
+      }
+    } 
+  });
 }
 
 export async function addWishlist(customerId: string, productId: string) {
@@ -538,7 +748,18 @@ export async function getCustomerCoupons(customerId: string) {
 }
 // ─── Wallet ────────────────────────────────────────────────────────────────────
 export async function getWallet(customerId: string) {
-  const wallet = await prisma.wallet.findUnique({ where: { customerId }, include: { transactions: { orderBy: { createdAt: 'desc' }, take: 20 } } });
+  const wallet = await prisma.wallet.findUnique({ 
+    where: { customerId }, 
+    select: {
+      id: true,
+      balance: true,
+      transactions: { 
+        orderBy: { createdAt: 'desc' }, 
+        take: 20,
+        select: { id: true, type: true, amount: true, reference: true, description: true, createdAt: true }
+      }
+    } 
+  });
   return wallet ?? { balance: 0, transactions: [] };
 }
 

@@ -122,6 +122,7 @@ export async function approveRequest(id: string, adminId: string) {
   if (!area) throw new AppError('BAD_REQUEST', 'Area not found for this request', 400);
 
   // Create the Vendor account
+  const vendorCode = `VND-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
   const vendor = await prisma.vendor.create({
     data: {
       areaId: area.id,
@@ -130,6 +131,7 @@ export async function approveRequest(id: string, adminId: string) {
       email: req.email ?? `vendor_${id}@districtmart.com`,
       passwordHash,
       shopName: req.shopName ?? 'My Shop',
+      code: vendorCode,
       slug,
       description: req.description,
       logoUrl: req.logoUrl,

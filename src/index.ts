@@ -4,6 +4,15 @@ import { connectDatabase, disconnectDatabase } from './lib/prisma.js';
 import { connectRedis, disconnectRedis } from './lib/redis.js';
 import { logger } from './lib/logger.js';
 
+process.on('unhandledRejection', (reason) => {
+  logger.fatal({ reason }, 'Unhandled promise rejection');
+  process.exit(1);
+});
+process.on('uncaughtException', (err) => {
+  logger.fatal({ err }, 'Uncaught exception');
+  process.exit(1);
+});
+
 async function bootstrap() {
   const dbOk = await connectDatabase();
   const redisOk = await connectRedis();

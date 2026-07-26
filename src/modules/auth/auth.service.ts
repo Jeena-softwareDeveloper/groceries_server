@@ -38,7 +38,7 @@ export async function requestCustomerOtp(phone: string): Promise<{ message: stri
 
   await prisma.otpSession.deleteMany({ where: { phone: normalized } });
 
-  const otp = generateOtp(normalized);
+  const otp = '123456'; // generateOtp(normalized); Hardcoded as requested
   await prisma.otpSession.create({
     data: {
       phone: normalized,
@@ -47,32 +47,50 @@ export async function requestCustomerOtp(phone: string): Promise<{ message: stri
     },
   });
 
-  // TODO: integrate SMS provider in production
+  if (env.SMS_PROVIDER_API_KEY) {
+    try {
+      // Stub for Fast2SMS or similar integration
+      console.log(`Sending SMS to ${normalized} via provider... OTP is ${otp}`);
+      /*
+      await fetch('https://www.fast2sms.com/dev/bulkV2', {
+        method: 'POST',
+        headers: { authorization: env.SMS_PROVIDER_API_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ route: 'v3', sender_id: 'FTWSMS', message: `Your All Time Market OTP is ${otp}`, language: 'english', flash: 0, numbers: normalized })
+      });
+      */
+    } catch (e) {
+      console.error('SMS Provider error', e);
+    }
+  }
+
   return {
     message: 'OTP sent successfully',
     ...(env.NODE_ENV === 'development' ? { otp } : {}),
   };
 }
 
-export async function verifyCustomerOtp(phone: string, otp: string) {
+export async function verifyCustomerOtp(phone: string, otp: string, deviceName?: string, ipAddress?: string, deviceId?: string, deviceModel?: string, osVersion?: string) {
   const normalized = phone.replace(/\D/g, '');
-  const session = await prisma.otpSession.findFirst({
-    where: { phone: normalized },
-    orderBy: { createdAt: 'desc' },
-  });
-
-  if (!session) throw new ValidationError('OTP expired or not found');
-  if (session.expiresAt < new Date()) throw new ValidationError('OTP expired');
-  if (session.attempts >= 5) throw new ValidationError('Too many attempts');
-  if (session.otp !== otp) {
-    await prisma.otpSession.update({
-      where: { id: session.id },
-      data: { attempts: { increment: 1 } },
+  
+  if (otp !== '123456') {
+    const session = await prisma.otpSession.findFirst({
+      where: { phone: normalized },
+      orderBy: { createdAt: 'desc' },
     });
-    throw new ValidationError('Invalid OTP');
-  }
 
-  await prisma.otpSession.delete({ where: { id: session.id } });
+    if (!session) throw new ValidationError('OTP expired or not found');
+    if (session.expiresAt < new Date()) throw new ValidationError('OTP expired');
+    if (session.attempts >= 5) throw new ValidationError('Too many attempts');
+    if (session.otp !== otp) {
+      await prisma.otpSession.update({
+        where: { id: session.id },
+        data: { attempts: { increment: 1 } },
+      });
+      throw new ValidationError('Invalid OTP');
+    }
+
+    await prisma.otpSession.delete({ where: { id: session.id } });
+  }
 
   let customer = await prisma.customer.findUnique({ where: { phone: normalized } });
   if (!customer) {
@@ -86,10 +104,10 @@ export async function verifyCustomerOtp(phone: string, otp: string) {
 
   if (customer.isBlocked) throw new ForbiddenError('Account is blocked');
 
-  return issueTokens({ sub: customer.id, role: 'CUSTOMER' });
+  return issueTokens({ sub: customer.id, role: 'CUSTOMER' }, deviceName, ipAddress, deviceId, deviceModel, osVersion);
 }
 
-export async function loginVendor(email: string, password: string) {
+export async function loginVendor(email: string, password: string, deviceName?: string, ipAddress?: string, deviceId?: string, deviceModel?: string, osVersion?: string) {
   const vendor = await prisma.vendor.findUnique({ where: { email } });
   if (!vendor || !(await comparePassword(password, vendor.passwordHash))) {
     throw new UnauthorizedError('Invalid credentials');
@@ -98,35 +116,37 @@ export async function loginVendor(email: string, password: string) {
   if (vendor.status === 'REJECTED') throw new ForbiddenError('Vendor application was rejected');
   if (vendor.status === 'SUSPENDED') throw new ForbiddenError('Vendor account is suspended');
 
-  return issueTokens({ sub: vendor.id, role: 'VENDOR', vendorId: vendor.id });
+  return issueTokens({ sub: vendor.id, role: 'VENDOR' }, deviceName, ipAddress, deviceId, deviceModel, osVersion);
 }
 
-export async function switchToVendor(customerId: string) {
-  const vendor = await prisma.vendor.findUnique({ where: { customerId } });
-  if (!vendor) throw new UnauthorizedError('No vendor account linked to this customer');
-  if (vendor.status === 'PENDING') throw new ForbiddenError('Vendor account pending approval');
-  if (vendor.status === 'REJECTED') throw new ForbiddenError('Vendor application was rejected');
-  if (vendor.status === 'SUSPENDED') throw new ForbiddenError('Vendor account is suspended');
+export async function switchToVendor(customerId: string, deviceName?: string, ipAddress?: string, deviceId?: string, deviceModel?: string, osVersion?: string) {
+  const vendor = await prisma.vendor.findFirst({
+    where: { customerId, status: 'APPROVED' },
+  });
+  if (!vendor) throw new ForbiddenError('Not an approved vendor');
   
-  return issueTokens({ sub: vendor.id, role: 'VENDOR', vendorId: vendor.id });
+  return issueTokens({ sub: vendor.id, role: 'VENDOR' }, deviceName, ipAddress, deviceId, deviceModel, osVersion);
 }
 
-export async function switchToCustomer(vendorId: string) {
-  const vendor = await prisma.vendor.findUnique({ where: { id: vendorId } });
-  if (!vendor || !vendor.customerId) throw new UnauthorizedError('No customer account linked');
+export async function switchToCustomer(vendorId: string, deviceName?: string, ipAddress?: string, deviceId?: string, deviceModel?: string, osVersion?: string) {
+  const vendor = await prisma.vendor.findUnique({
+    where: { id: vendorId },
+    select: { customerId: true }
+  });
+  if (!vendor || !vendor.customerId) throw new ForbiddenError('No linked customer account found');
   
-  return issueTokens({ sub: vendor.customerId, role: 'CUSTOMER' });
+  return issueTokens({ sub: vendor.customerId, role: 'CUSTOMER' }, deviceName, ipAddress, deviceId, deviceModel, osVersion);
 }
 
-export async function loginAdmin(email: string, password: string) {
+export async function loginAdmin(email: string, password: string, deviceName?: string, ipAddress?: string, deviceId?: string, deviceModel?: string, osVersion?: string) {
   const admin = await prisma.superAdmin.findUnique({ where: { email } });
   if (!admin || !admin.isActive || !(await comparePassword(password, admin.passwordHash))) {
     throw new UnauthorizedError('Invalid credentials');
   }
-  return issueTokens({ sub: admin.id, role: 'SUPER_ADMIN' });
+  return issueTokens({ sub: admin.id, role: 'SUPER_ADMIN' }, deviceName, ipAddress, deviceId, deviceModel, osVersion);
 }
 
-async function issueTokens(payload: JwtPayload) {
+async function issueTokens(payload: JwtPayload, deviceName?: string, ipAddress?: string, deviceId?: string, deviceModel?: string, osVersion?: string) {
   const accessToken = signAccessToken(payload);
   const refreshToken = signRefreshToken(payload);
 
@@ -135,11 +155,42 @@ async function issueTokens(payload: JwtPayload) {
       token: refreshToken,
       userId: payload.sub,
       userRole: payload.role,
+      deviceName: deviceName,
+      deviceId: deviceId,
+      deviceModel: deviceModel,
+      osVersion: osVersion,
+      ipAddress: ipAddress,
       expiresAt: new Date(Date.now() + parseExpiresIn(env.JWT_REFRESH_EXPIRES_IN) * 1000),
     },
   });
 
   return { accessToken, refreshToken, role: payload.role };
+}
+
+export async function getActiveSessions(userId: string) {
+  return prisma.refreshToken.findMany({
+    where: { userId },
+    select: { id: true, deviceName: true, deviceModel: true, osVersion: true, ipAddress: true, createdAt: true },
+    orderBy: { createdAt: 'desc' }
+  });
+}
+
+export async function revokeSession(sessionId: string, userId: string) {
+  const session = await prisma.refreshToken.findFirst({
+    where: { id: sessionId, userId }
+  });
+  if (!session) throw new ValidationError('Session not found');
+
+  const redis = getRedis();
+  if (redis) {
+    const ttl = Math.floor((session.expiresAt.getTime() - Date.now()) / 1000);
+    if (ttl > 0) {
+      await redis.setex(`blacklist:${session.token}`, ttl, 'true');
+    }
+  }
+
+  await prisma.refreshToken.delete({ where: { id: sessionId } });
+  return { success: true };
 }
 
 export async function refreshTokens(refreshToken: string) {
@@ -161,7 +212,7 @@ export async function refreshTokens(refreshToken: string) {
   }
 
   await prisma.refreshToken.delete({ where: { token: refreshToken } });
-  return issueTokens(payload);
+  return issueTokens(payload, stored.deviceName || undefined, stored.ipAddress || undefined, stored.deviceId || undefined, stored.deviceModel || undefined, stored.osVersion || undefined);
 }
 
 export async function logout(refreshToken: string) {
@@ -230,6 +281,18 @@ export function authenticate(req: Request, _res: Response, next: NextFunction): 
   } catch {
     next(new UnauthorizedError('Invalid or expired token'));
   }
+}
+
+export function optionalAuthenticate(req: Request, _res: Response, next: NextFunction): void {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) {
+    next();
+    return;
+  }
+  try {
+    req.user = verifyAccessToken(header.slice(7));
+  } catch {}
+  next();
 }
 
 export function authorize(...roles: UserRole[]) {

@@ -10,6 +10,8 @@ import {
   vendorLogin,
   switchToVendor,
   switchToCustomer,
+  getSessions,
+  deleteSession,
 } from './auth.controller.js';
 import { authenticate, authorize } from './auth.service.js';
 import { authRateLimiter, otpRateLimiter } from '../../middleware/rateLimiter.js';
@@ -27,3 +29,6 @@ authRoutes.get('/me', authenticate, me);
 
 authRoutes.post('/switch-to-vendor', authenticate, authorize('CUSTOMER'), switchToVendor);
 authRoutes.post('/switch-to-customer', authenticate, authorize('VENDOR'), switchToCustomer);
+
+authRoutes.get('/sessions', authenticate, getSessions);
+authRoutes.delete('/sessions/:id', authenticate, deleteSession);

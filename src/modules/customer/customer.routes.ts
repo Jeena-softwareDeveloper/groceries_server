@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, authorize } from '../auth/auth.service.js';
+import { authenticate, authorize, optionalAuthenticate } from '../auth/auth.service.js';
 import { sendSuccess } from '../../utils/response.js';
 import { paramId } from '../../utils/params.js';
 import * as svc from './customer.service.js';
@@ -8,7 +8,8 @@ import { vendorRequestCustomerRoutes } from '../vendor-request/vendor-request.cu
 
 export const customerRoutes = Router();
 
-// Public routes
+// Public routes with optional auth to get req.user
+customerRoutes.use(optionalAuthenticate);
 customerRoutes.get('/home/feed', async (req, res, next) => {
   try {
     sendSuccess(res, await svc.getHomeFeed(req.query.districtId as string, req.query.areaId as string));
@@ -42,7 +43,7 @@ customerRoutes.get('/shops/:id/products', async (req, res, next) => {
   try { sendSuccess(res, await svc.getShopProducts(paramId(req), req.query.categoryId as string)); } catch (e) { next(e); }
 });
 customerRoutes.get('/products/:id', async (req, res, next) => {
-  try { sendSuccess(res, await svc.getProduct(paramId(req))); } catch (e) { next(e); }
+  try { sendSuccess(res, await svc.getProduct(paramId(req), req.user)); } catch (e) { next(e); }
 });
 customerRoutes.get('/search', async (req, res, next) => {
   try {
@@ -150,11 +151,10 @@ customerRoutes.delete('/search/recent', ...auth, async (req, res, next) => {
   try { await svc.clearRecentSearches(req.user!.sub); sendSuccess(res, { cleared: true }); } catch (e) { next(e); }
 });
 
-// Razorpay webhook (public — verify signature in production)
-customerRoutes.post('/payment/webhook', async (req, res, next) => {
-  try { sendSuccess(res, await svc.handlePaymentWebhook(req.body)); } catch (e) { next(e); }
-});
-
 // Vendor onboarding request
 customerRoutes.use('/vendor-request', vendorRequestCustomerRoutes);
 
+// Pincode lookup
+customerRoutes.get('/pincode/:pincode', ...auth, async (req, res, next) => {
+  try { sendSuccess(res, await svc.lookupPincode(req.params.pincode as string)); } catch (e) { next(e); }
+});

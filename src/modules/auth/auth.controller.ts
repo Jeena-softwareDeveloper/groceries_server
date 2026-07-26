@@ -4,9 +4,10 @@ import * as authService from './auth.service.js';
 import { sendSuccess } from '../../utils/response.js';
 
 const otpRequestSchema = z.object({ phone: z.string().min(10) });
-const otpVerifySchema = z.object({ phone: z.string().min(10), otp: z.string().length(6) });
-const loginSchema = z.object({ email: z.string().email(), password: z.string().min(6) });
+const otpVerifySchema = z.object({ phone: z.string().min(10), otp: z.string().length(6), deviceId: z.string().optional(), deviceModel: z.string().optional(), osVersion: z.string().optional() });
+const loginSchema = z.object({ email: z.string().email(), password: z.string().min(6), deviceId: z.string().optional(), deviceModel: z.string().optional(), osVersion: z.string().optional() });
 const refreshSchema = z.object({ refreshToken: z.string().min(1) });
+const switchSchema = z.object({ deviceId: z.string().optional(), deviceModel: z.string().optional(), osVersion: z.string().optional() });
 
 export async function customerOtpRequest(req: Request, res: Response, next: NextFunction) {
   try {
@@ -20,8 +21,9 @@ export async function customerOtpRequest(req: Request, res: Response, next: Next
 
 export async function customerOtpVerify(req: Request, res: Response, next: NextFunction) {
   try {
-    const { phone, otp } = otpVerifySchema.parse(req.body);
-    const tokens = await authService.verifyCustomerOtp(phone, otp);
+    const { phone, otp, deviceId, deviceModel, osVersion } = otpVerifySchema.parse(req.body);
+    const deviceName = req.headers['user-agent'];
+    const tokens = await authService.verifyCustomerOtp(phone, otp, deviceName, req.ip, deviceId, deviceModel, osVersion);
     sendSuccess(res, tokens);
   } catch (err) {
     next(err);
@@ -30,8 +32,9 @@ export async function customerOtpVerify(req: Request, res: Response, next: NextF
 
 export async function vendorLogin(req: Request, res: Response, next: NextFunction) {
   try {
-    const { email, password } = loginSchema.parse(req.body);
-    const tokens = await authService.loginVendor(email, password);
+    const { email, password, deviceId, deviceModel, osVersion } = loginSchema.parse(req.body);
+    const deviceName = req.headers['user-agent'];
+    const tokens = await authService.loginVendor(email, password, deviceName, req.ip, deviceId, deviceModel, osVersion);
     sendSuccess(res, tokens);
   } catch (err) {
     next(err);
@@ -40,8 +43,9 @@ export async function vendorLogin(req: Request, res: Response, next: NextFunctio
 
 export async function adminLogin(req: Request, res: Response, next: NextFunction) {
   try {
-    const { email, password } = loginSchema.parse(req.body);
-    const tokens = await authService.loginAdmin(email, password);
+    const { email, password, deviceId, deviceModel, osVersion } = loginSchema.parse(req.body);
+    const deviceName = req.headers['user-agent'];
+    const tokens = await authService.loginAdmin(email, password, deviceName, req.ip, deviceId, deviceModel, osVersion);
     sendSuccess(res, tokens);
   } catch (err) {
     next(err);
@@ -80,7 +84,9 @@ export async function me(req: Request, res: Response, next: NextFunction) {
 
 export async function switchToVendor(req: Request, res: Response, next: NextFunction) {
   try {
-    const tokens = await authService.switchToVendor(req.user!.sub);
+    const { deviceId, deviceModel, osVersion } = switchSchema.parse(req.body || {});
+    const deviceName = req.headers['user-agent'];
+    const tokens = await authService.switchToVendor(req.user!.sub, deviceName, req.ip, deviceId, deviceModel, osVersion);
     sendSuccess(res, tokens);
   } catch (err) {
     next(err);
@@ -89,11 +95,29 @@ export async function switchToVendor(req: Request, res: Response, next: NextFunc
 
 export async function switchToCustomer(req: Request, res: Response, next: NextFunction) {
   try {
-    // For VENDOR role, req.user!.vendorId is not in JwtPayload yet, but req.user!.sub is the vendor ID
-    const tokens = await authService.switchToCustomer(req.user!.sub);
+    const { deviceId, deviceModel, osVersion } = switchSchema.parse(req.body || {});
+    const deviceName = req.headers['user-agent'];
+    const tokens = await authService.switchToCustomer(req.user!.sub, deviceName, req.ip, deviceId, deviceModel, osVersion);
     sendSuccess(res, tokens);
   } catch (err) {
     next(err);
   }
 }
 
+export async function getSessions(req: Request, res: Response, next: NextFunction) {
+  try {
+    const sessions = await authService.getActiveSessions(req.user!.sub);
+    sendSuccess(res, sessions);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function deleteSession(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await authService.revokeSession(req.params.id as string, req.user!.sub);
+    sendSuccess(res, result);
+  } catch (err) {
+    next(err);
+  }
+}

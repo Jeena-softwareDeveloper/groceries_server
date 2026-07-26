@@ -3,6 +3,7 @@ import { authenticate, authorize } from '../auth/auth.service.js';
 import { sendSuccess } from '../../utils/response.js';
 import { paramId } from '../../utils/params.js';
 import * as svc from './vendor.service.js';
+import { vendorProfileSchema, productSchema, offerSchema } from './vendor.schemas.js';
 
 export const vendorRoutes = Router();
 vendorRoutes.use(authenticate, authorize('VENDOR'));
@@ -29,7 +30,10 @@ vendorRoutes.get('/profile', async (req, res, next) => {
   try { sendSuccess(res, await svc.getVendorProfile(req.user!.sub)); } catch (e) { next(e); }
 });
 vendorRoutes.put('/profile', async (req, res, next) => {
-  try { sendSuccess(res, await svc.updateVendorProfile(req.user!.sub, req.body)); } catch (e) { next(e); }
+  try {
+    const data = vendorProfileSchema.parse(req.body);
+    sendSuccess(res, await svc.updateVendorProfile(req.user!.sub, data)); 
+  } catch (e) { next(e); }
 });
 
 // ─── Products ─────────────────────────────────────────────────────────────────
@@ -46,10 +50,16 @@ vendorRoutes.get('/products', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 vendorRoutes.post('/products', async (req, res, next) => {
-  try { sendSuccess(res, await svc.createProduct(req.user!.sub, req.body), 201); } catch (e) { next(e); }
+  try { 
+    const data = productSchema.parse(req.body);
+    sendSuccess(res, await svc.createProduct(req.user!.sub, data), 201); 
+  } catch (e) { next(e); }
 });
 vendorRoutes.put('/products/:id', async (req, res, next) => {
-  try { sendSuccess(res, await svc.updateProduct(req.user!.sub, paramId(req), req.body)); } catch (e) { next(e); }
+  try { 
+    const data = productSchema.partial().parse(req.body);
+    sendSuccess(res, await svc.updateProduct(req.user!.sub, paramId(req), data)); 
+  } catch (e) { next(e); }
 });
 vendorRoutes.post('/products/:id/submit-approval', async (req, res, next) => {
   try { sendSuccess(res, await svc.submitProductForApproval(req.user!.sub, paramId(req))); } catch (e) { next(e); }
@@ -129,7 +139,16 @@ vendorRoutes.get('/offers', async (req, res, next) => {
   try { sendSuccess(res, await svc.listVendorOffers(req.user!.sub)); } catch (e) { next(e); }
 });
 vendorRoutes.post('/offers', async (req, res, next) => {
-  try { sendSuccess(res, await svc.createVendorOffer(req.user!.sub, req.body), 201); } catch (e) { next(e); }
+  try { 
+    const data = offerSchema.parse(req.body);
+    sendSuccess(res, await svc.createVendorOffer(req.user!.sub, data), 201); 
+  } catch (e) { next(e); }
+});
+vendorRoutes.put('/offers/:id', async (req, res, next) => {
+  try { 
+    const data = offerSchema.partial().parse(req.body);
+    sendSuccess(res, await svc.updateVendorOffer(req.user!.sub, paramId(req), data)); 
+  } catch (e) { next(e); }
 });
 vendorRoutes.delete('/offers/:id', async (req, res, next) => {
   try { await svc.deleteVendorOffer(req.user!.sub, paramId(req)); sendSuccess(res, { deleted: true }); } catch (e) { next(e); }

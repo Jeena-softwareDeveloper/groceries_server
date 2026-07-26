@@ -4,7 +4,7 @@ import { NotFoundError } from '../../../utils/errors.js';
 
 const districtSchema = z.object({
   name: z.string().min(2),
-  code: z.string().min(2).max(10),
+  code: z.string().min(2).max(10).optional(),
   isActive: z.boolean().optional(),
 });
 
@@ -28,7 +28,15 @@ export async function getDistrict(id: string) {
 
 export async function createDistrict(data: z.infer<typeof districtSchema>) {
   const parsed = districtSchema.parse(data);
-  return prisma.district.create({ data: parsed });
+  const code = parsed.code || parsed.name.substring(0, 3).toUpperCase();
+  
+  return prisma.district.create({ 
+    data: { 
+      name: parsed.name,
+      code,
+      isActive: parsed.isActive ?? true 
+    } 
+  });
 }
 
 export async function updateDistrict(id: string, data: Partial<z.infer<typeof districtSchema>>) {

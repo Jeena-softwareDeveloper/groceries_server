@@ -24,6 +24,14 @@ export async function get(req: Request, res: Response, next: NextFunction) {
   }
 }
 
+export async function update(req: Request, res: Response, next: NextFunction) {
+  try {
+    sendSuccess(res, await service.updateVendor(paramId(req), req.body));
+  } catch (e) {
+    next(e);
+  }
+}
+
 export async function approve(req: Request, res: Response, next: NextFunction) {
   try {
     sendSuccess(res, await service.approveVendor(paramId(req), req.user!.sub));

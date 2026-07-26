@@ -5,6 +5,7 @@ export const vendorAdminRoutes = Router();
 
 vendorAdminRoutes.get('/', ctrl.list);
 vendorAdminRoutes.get('/:id', ctrl.get);
+vendorAdminRoutes.put('/:id', ctrl.update);
 vendorAdminRoutes.post('/:id/approve', ctrl.approve);
 vendorAdminRoutes.post('/:id/reject', ctrl.reject);
 vendorAdminRoutes.post('/:id/suspend', ctrl.suspend);
