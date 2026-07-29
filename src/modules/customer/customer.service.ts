@@ -70,7 +70,8 @@ async function setCartCouponCode(customerId: string, code: string | null) {
 
 // ─── Home Feed ─────────────────────────────────────────────────────────────────
 export async function getHomeFeed(districtIdInput: string, areaId?: string) {
-  const districtId = await resolveDistrictId(districtIdInput);  const cacheKey = `home:feed:${districtId}`;
+  const districtId = await resolveDistrictId(districtIdInput);
+  const cacheKey = `home:feed:${districtId}:${areaId ?? 'all'}`;
   const cached = await cacheGet<unknown>(cacheKey);
   if (cached) return cached;
 
@@ -394,13 +395,24 @@ export async function getCart(customerId: string) {
   };
 }
 export async function addToCart(customerId: string, productId: string, quantity = 1) {
-  const product = await prisma.product.findFirst({ where: { id: productId, status: 'PUBLISHED' }, include: { inventory: true } });
+  const product = await prisma.product.findFirst({
+    where: { id: productId, status: 'PUBLISHED', isActive: true },
+    include: { inventory: true },
+  });
   if (!product) throw new NotFoundError('Product not found');
-  if (!product.inventory || product.inventory.stock < quantity) throw new ValidationError('Insufficient stock');
+
+  const existing = await prisma.cartItem.findUnique({
+    where: { customerId_productId: { customerId, productId } },
+  });
+  const nextQty = (existing?.quantity ?? 0) + quantity;
+  if (!product.inventory || product.inventory.stock < nextQty) {
+    throw new ValidationError('Insufficient stock');
+  }
+
   return prisma.cartItem.upsert({
     where: { customerId_productId: { customerId, productId } },
     create: { customerId, productId, vendorId: product.vendorId, quantity },
-    update: { quantity: { increment: quantity } },
+    update: { quantity: nextQty },
     include: { product: true },
   });
 }
@@ -434,7 +446,12 @@ export async function removeCartCoupon(customerId: string) {
 }
 
 // ─── Checkout (split orders per vendor) ────────────────────────────────────────
-export async function checkout(customerId: string, addressId: string, paymentMethod: 'COD' | 'RAZORPAY' = 'COD', couponCode?: string) {  const address = await prisma.address.findFirst({ where: { id: addressId, customerId } });
+export async function checkout(customerId: string, addressId: string, paymentMethod: 'COD' | 'RAZORPAY' = 'COD', couponCode?: string) {
+  if (paymentMethod !== 'COD') {
+    throw new ValidationError('Only Cash on Delivery is available right now');
+  }
+
+  const address = await prisma.address.findFirst({ where: { id: addressId, customerId } });
   if (!address) throw new NotFoundError('Address not found');
 
   const cartItems = await prisma.cartItem.findMany({
@@ -444,6 +461,9 @@ export async function checkout(customerId: string, addressId: string, paymentMet
   if (cartItems.length === 0) throw new ValidationError('Cart is empty');
 
   for (const item of cartItems) {
+    if (!item.product.isActive || item.product.status !== 'PUBLISHED') {
+      throw new ValidationError(`${item.product.name} is no longer available`);
+    }
     if (!item.product.inventory || item.product.inventory.stock < item.quantity) {
       throw new ValidationError(`Insufficient stock for ${item.product.name}`);
     }
@@ -454,6 +474,16 @@ export async function checkout(customerId: string, addressId: string, paymentMet
     const list = byVendor.get(item.vendorId) ?? [];
     list.push(item);
     byVendor.set(item.vendorId, list);
+  }
+
+  for (const items of byVendor.values()) {
+    const vendorSubtotal = items.reduce((s, i) => s + Number(i.product.sellingPrice) * i.quantity, 0);
+    const minOrder = Number(items[0].vendor.minOrderValue ?? 0);
+    if (minOrder > 0 && vendorSubtotal < minOrder) {
+      throw new ValidationError(
+        `Minimum order for ${items[0].vendor.shopName} is ₹${minOrder.toFixed(0)}. Add ₹${(minOrder - vendorSubtotal).toFixed(0)} more.`
+      );
+    }
   }
 
   const cartSubtotal = cartItems.reduce((s, i) => s + Number(i.product.sellingPrice) * i.quantity, 0);
@@ -529,10 +559,13 @@ export async function checkout(customerId: string, addressId: string, paymentMet
       });
 
       for (const item of items) {
-        await tx.inventory.update({
-          where: { productId: item.productId },
+        const stockUpdate = await tx.inventory.updateMany({
+          where: { productId: item.productId, stock: { gte: item.quantity } },
           data: { stock: { decrement: item.quantity } },
         });
+        if (stockUpdate.count === 0) {
+          throw new ValidationError(`Insufficient stock for ${item.product.name}`);
+        }
       }
 
       await tx.notification.create({
@@ -646,24 +679,83 @@ export async function getProfile(customerId: string) {
 }
 
 export async function updateProfile(customerId: string, data: { name?: string; email?: string }) {
-  return prisma.customer.update({ where: { id: customerId }, data });
+  const payload: { name?: string; email?: string | null } = {};
+  if (data.name !== undefined) payload.name = data.name.trim();
+  if (data.email !== undefined) payload.email = data.email.trim() || null;
+  return prisma.customer.update({ where: { id: customerId }, data: payload });
 }
 
 export async function listAddresses(customerId: string) {
   return prisma.address.findMany({ where: { customerId } });
 }
 
-export async function createAddress(customerId: string, data: Record<string, unknown>) {
-  return prisma.address.create({ data: { ...data, customerId } as Parameters<typeof prisma.address.create>[0]['data'] });
+export async function createAddress(
+  customerId: string,
+  data: {
+    label: string;
+    line1: string;
+    line2?: string | null;
+    city: string;
+    state: string;
+    pincode: string;
+    lat?: number | null;
+    lng?: number | null;
+    isDefault?: boolean;
+  }
+) {
+  if (data.isDefault) {
+    await prisma.address.updateMany({ where: { customerId }, data: { isDefault: false } });
+  }
+  return prisma.address.create({
+    data: {
+      customerId,
+      label: data.label.trim(),
+      line1: data.line1.trim(),
+      line2: data.line2?.trim() || null,
+      city: data.city.trim(),
+      state: data.state.trim(),
+      pincode: data.pincode.trim(),
+      lat: data.lat ?? null,
+      lng: data.lng ?? null,
+      isDefault: data.isDefault ?? false,
+    },
+  });
 }
 
-export async function updateAddress(customerId: string, addressId: string, data: Record<string, unknown>) {
+export async function updateAddress(
+  customerId: string,
+  addressId: string,
+  data: {
+    label?: string;
+    line1?: string;
+    line2?: string | null;
+    city?: string;
+    state?: string;
+    pincode?: string;
+    lat?: number | null;
+    lng?: number | null;
+    isDefault?: boolean;
+  }
+) {
   const existing = await prisma.address.findFirst({ where: { id: addressId, customerId } });
   if (!existing) throw new NotFoundError('Address not found');
   if (data.isDefault) {
     await prisma.address.updateMany({ where: { customerId }, data: { isDefault: false } });
   }
-  return prisma.address.update({ where: { id: addressId }, data: data as Parameters<typeof prisma.address.update>[0]['data'] });
+  return prisma.address.update({
+    where: { id: addressId },
+    data: {
+      ...(data.label !== undefined && { label: data.label.trim() }),
+      ...(data.line1 !== undefined && { line1: data.line1.trim() }),
+      ...(data.line2 !== undefined && { line2: data.line2?.trim() || null }),
+      ...(data.city !== undefined && { city: data.city.trim() }),
+      ...(data.state !== undefined && { state: data.state.trim() }),
+      ...(data.pincode !== undefined && { pincode: data.pincode.trim() }),
+      ...(data.lat !== undefined && { lat: data.lat }),
+      ...(data.lng !== undefined && { lng: data.lng }),
+      ...(data.isDefault !== undefined && { isDefault: data.isDefault }),
+    },
+  });
 }
 
 export async function deleteAddress(customerId: string, addressId: string) {

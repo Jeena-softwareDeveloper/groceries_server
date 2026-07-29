@@ -45,14 +45,43 @@ export async function submitApplication(customerId: string) {
     where: { customerId, status: { in: ['DRAFT', 'MORE_INFO_REQUIRED'] } },
   });
   if (!request) throw new NotFoundError('No draft application found');
-  // Basic validation — required fields
-  const required = ['shopName', 'ownerName', 'mobileNumber', 'districtId', 'address'];
+
+  const required = ['shopName', 'ownerName', 'mobileNumber', 'districtId', 'address', 'shopCategory', 'accountHolderName', 'accountNumber', 'ifscCode'];
   const missing = required.filter((k) => !request[k as keyof typeof request]);
   if (missing.length) throw new AppError('VALIDATION_ERROR', `Missing required fields: ${missing.join(', ')}`, 422);
 
+  const mobile = String(request.mobileNumber ?? '').replace(/\D/g, '');
+  if (!/^[6-9]\d{9}$/.test(mobile)) {
+    throw new AppError('VALIDATION_ERROR', 'Enter a valid 10-digit Indian mobile number', 422);
+  }
+
+  const ifsc = String(request.ifscCode ?? '').trim().toUpperCase();
+  if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) {
+    throw new AppError('VALIDATION_ERROR', 'Enter a valid IFSC code', 422);
+  }
+
+  const accountNumber = String(request.accountNumber ?? '').replace(/\s/g, '');
+  if (!/^\d{9,18}$/.test(accountNumber)) {
+    throw new AppError('VALIDATION_ERROR', 'Enter a valid bank account number (9-18 digits)', 422);
+  }
+
+  if (request.districtId) {
+    const areaCount = await prisma.area.count({ where: { districtId: request.districtId, isActive: true } });
+    if (areaCount > 0 && !request.areaId) {
+      throw new AppError('VALIDATION_ERROR', 'Please select an area', 422);
+    }
+  }
+
   return prisma.vendorRequest.update({
     where: { id: request.id },
-    data: { status: 'PENDING', submittedAt: new Date(), adminRemarks: null },
+    data: {
+      status: 'PENDING',
+      submittedAt: new Date(),
+      adminRemarks: null,
+      mobileNumber: mobile,
+      ifscCode: ifsc,
+      accountNumber,
+    },
   });
 }
 
@@ -158,17 +187,18 @@ export async function approveRequest(id: string, adminId: string) {
     data: { status: 'APPROVED', reviewedBy: adminId, reviewedAt: new Date() },
   });
 
-  // Notify the customer
+  // Notify the customer — never persist plaintext passwords in notifications
   await prisma.notification.create({
     data: {
       customerId: req.customerId,
       type: 'VENDOR_APPROVED',
-      title: '🎉 Vendor Application Approved!',
-      body: `Congratulations! Your shop "${req.shopName}" has been approved. Login at the Vendor Panel with your email and temp password: ${tempPassword}`,
-      data: { vendorId: vendor.id, tempPassword },
+      title: 'Vendor Application Approved!',
+      body: `Congratulations! Your shop "${req.shopName}" has been approved. Use your registered email to log in to the Vendor Panel. Check your email/SMS for temporary login details.`,
+      data: { vendorId: vendor.id },
     },
   });
 
+  // tempPassword returned only to admin API response (send via secure channel once)
   return { vendor, tempPassword };
 }
 

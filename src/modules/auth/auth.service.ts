@@ -25,20 +25,42 @@ export async function comparePassword(password: string, hash: string): Promise<b
   return bcrypt.compare(password, hash);
 }
 
+const INDIAN_MOBILE = /^[6-9]\d{9}$/;
+
+/** Temporary production test login — change/remove later when real SMS OTP is live for all users */
+const TEST_PHONE = '9999999999';
+const TEST_OTP = '123456';
+
+function normalizePhone(phone: string): string {
+  return phone.replace(/\D/g, '').slice(-10);
+}
+
+function assertValidPhone(phone: string): string {
+  const normalized = normalizePhone(phone);
+  if (!INDIAN_MOBILE.test(normalized)) {
+    throw new ValidationError('Enter a valid 10-digit Indian mobile number');
+  }
+  return normalized;
+}
+
+function isTestPhone(phone: string): boolean {
+  return phone === TEST_PHONE;
+}
+
 function generateOtp(phone: string): string {
-  if (phone === '9999999999' || env.NODE_ENV === 'development') {
-    return '123456';
+  // Test number works in production too (OTP always 123456). Other numbers get random OTP.
+  if (isTestPhone(phone) || env.NODE_ENV === 'development') {
+    return TEST_OTP;
   }
   return String(randomInt(100000, 999999));
 }
 
 export async function requestCustomerOtp(phone: string): Promise<{ message: string; otp?: string }> {
-  const normalized = phone.replace(/\D/g, '');
-  if (normalized.length < 10) throw new ValidationError('Invalid phone number');
+  const normalized = assertValidPhone(phone);
 
   await prisma.otpSession.deleteMany({ where: { phone: normalized } });
 
-  const otp = '123456'; // generateOtp(normalized); Hardcoded as requested
+  const otp = generateOtp(normalized);
   await prisma.otpSession.create({
     data: {
       phone: normalized,
@@ -47,50 +69,68 @@ export async function requestCustomerOtp(phone: string): Promise<{ message: stri
     },
   });
 
-  if (env.SMS_PROVIDER_API_KEY) {
+  // Skip SMS for test number so production login always works with fixed OTP
+  const shouldSendSms =
+    !!env.SMS_PROVIDER_API_KEY &&
+    env.NODE_ENV !== 'development' &&
+    !isTestPhone(normalized);
+
+  if (shouldSendSms) {
     try {
-      // Stub for Fast2SMS or similar integration
-      console.log(`Sending SMS to ${normalized} via provider... OTP is ${otp}`);
-      /*
       await fetch('https://www.fast2sms.com/dev/bulkV2', {
         method: 'POST',
-        headers: { authorization: env.SMS_PROVIDER_API_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ route: 'v3', sender_id: 'FTWSMS', message: `Your All Time Market OTP is ${otp}`, language: 'english', flash: 0, numbers: normalized })
+        headers: {
+          authorization: env.SMS_PROVIDER_API_KEY!,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          route: 'v3',
+          sender_id: 'FTWSMS',
+          message: `Your All Time Market OTP is ${otp}`,
+          language: 'english',
+          flash: 0,
+          numbers: normalized,
+        }),
       });
-      */
     } catch (e) {
       console.error('SMS Provider error', e);
+      throw new ValidationError('Failed to send OTP. Please try again.');
     }
+  } else if (env.NODE_ENV !== 'development' && !isTestPhone(normalized)) {
+    console.warn('SMS_PROVIDER_API_KEY missing — OTP generated but not sent for', normalized);
   }
 
   return {
     message: 'OTP sent successfully',
-    ...(env.NODE_ENV === 'development' ? { otp } : {}),
+    // Expose OTP only in development, or for the temporary test phone
+    ...((env.NODE_ENV === 'development' || isTestPhone(normalized)) ? { otp } : {}),
   };
 }
 
 export async function verifyCustomerOtp(phone: string, otp: string, deviceName?: string, ipAddress?: string, deviceId?: string, deviceModel?: string, osVersion?: string) {
-  const normalized = phone.replace(/\D/g, '');
-  
-  if (otp !== '123456') {
-    const session = await prisma.otpSession.findFirst({
-      where: { phone: normalized },
-      orderBy: { createdAt: 'desc' },
-    });
+  const normalized = assertValidPhone(phone);
 
-    if (!session) throw new ValidationError('OTP expired or not found');
-    if (session.expiresAt < new Date()) throw new ValidationError('OTP expired');
-    if (session.attempts >= 5) throw new ValidationError('Too many attempts');
-    if (session.otp !== otp) {
-      await prisma.otpSession.update({
-        where: { id: session.id },
-        data: { attempts: { increment: 1 } },
-      });
-      throw new ValidationError('Invalid OTP');
-    }
-
-    await prisma.otpSession.delete({ where: { id: session.id } });
+  if (!/^\d{6}$/.test(otp)) {
+    throw new ValidationError('Invalid OTP');
   }
+
+  const session = await prisma.otpSession.findFirst({
+    where: { phone: normalized },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  if (!session) throw new ValidationError('OTP expired or not found');
+  if (session.expiresAt < new Date()) throw new ValidationError('OTP expired');
+  if (session.attempts >= 5) throw new ValidationError('Too many attempts');
+  if (session.otp !== otp) {
+    await prisma.otpSession.update({
+      where: { id: session.id },
+      data: { attempts: { increment: 1 } },
+    });
+    throw new ValidationError('Invalid OTP');
+  }
+
+  await prisma.otpSession.delete({ where: { id: session.id } });
 
   let customer = await prisma.customer.findUnique({ where: { phone: normalized } });
   if (!customer) {

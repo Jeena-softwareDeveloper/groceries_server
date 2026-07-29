@@ -3,8 +3,19 @@ import { z } from 'zod';
 import * as authService from './auth.service.js';
 import { sendSuccess } from '../../utils/response.js';
 
-const otpRequestSchema = z.object({ phone: z.string().min(10) });
-const otpVerifySchema = z.object({ phone: z.string().min(10), otp: z.string().length(6), deviceId: z.string().optional(), deviceModel: z.string().optional(), osVersion: z.string().optional() });
+const indianPhone = z
+  .string()
+  .transform((v) => v.replace(/\D/g, '').slice(-10))
+  .refine((v) => /^[6-9]\d{9}$/.test(v), 'Enter a valid 10-digit Indian mobile number');
+
+const otpRequestSchema = z.object({ phone: indianPhone });
+const otpVerifySchema = z.object({
+  phone: indianPhone,
+  otp: z.string().regex(/^\d{6}$/, 'OTP must be 6 digits'),
+  deviceId: z.string().optional(),
+  deviceModel: z.string().optional(),
+  osVersion: z.string().optional(),
+});
 const loginSchema = z.object({ email: z.string().email(), password: z.string().min(6), deviceId: z.string().optional(), deviceModel: z.string().optional(), osVersion: z.string().optional() });
 const refreshSchema = z.object({ refreshToken: z.string().min(1) });
 const switchSchema = z.object({ deviceId: z.string().optional(), deviceModel: z.string().optional(), osVersion: z.string().optional() });

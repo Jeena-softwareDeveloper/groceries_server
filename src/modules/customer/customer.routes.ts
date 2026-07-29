@@ -4,6 +4,17 @@ import { sendSuccess } from '../../utils/response.js';
 import { paramId } from '../../utils/params.js';
 import * as svc from './customer.service.js';
 import { vendorRequestCustomerRoutes } from '../vendor-request/vendor-request.customer.routes.js';
+import {
+  addToCartSchema,
+  addressSchema,
+  checkoutSchema,
+  couponSchema,
+  profileSchema,
+  reviewSchema,
+  supportTicketSchema,
+  updateCartSchema,
+  wishlistSchema,
+} from './customer.schemas.js';
 
 
 export const customerRoutes = Router();
@@ -64,22 +75,34 @@ customerRoutes.get('/cart', ...auth, async (req, res, next) => {
   try { sendSuccess(res, await svc.getCart(req.user!.sub)); } catch (e) { next(e); }
 });
 customerRoutes.post('/cart', ...auth, async (req, res, next) => {
-  try { sendSuccess(res, await svc.addToCart(req.user!.sub, req.body.productId, req.body.quantity), 201); } catch (e) { next(e); }
+  try {
+    const body = addToCartSchema.parse(req.body);
+    sendSuccess(res, await svc.addToCart(req.user!.sub, body.productId, body.quantity), 201);
+  } catch (e) { next(e); }
 });
 customerRoutes.put('/cart/:productId', ...auth, async (req, res, next) => {
-  try { sendSuccess(res, await svc.updateCartItem(req.user!.sub, paramId(req, 'productId'), req.body.quantity)); } catch (e) { next(e); }
+  try {
+    const body = updateCartSchema.parse(req.body);
+    sendSuccess(res, await svc.updateCartItem(req.user!.sub, paramId(req, 'productId'), body.quantity));
+  } catch (e) { next(e); }
 });
 customerRoutes.delete('/cart/:productId', ...auth, async (req, res, next) => {
   try { await svc.removeFromCart(req.user!.sub, paramId(req, 'productId')); sendSuccess(res, { deleted: true }); } catch (e) { next(e); }
 });
 customerRoutes.post('/cart/coupon', ...auth, async (req, res, next) => {
-  try { sendSuccess(res, await svc.applyCartCoupon(req.user!.sub, req.body.code)); } catch (e) { next(e); }
+  try {
+    const body = couponSchema.parse(req.body);
+    sendSuccess(res, await svc.applyCartCoupon(req.user!.sub, body.code));
+  } catch (e) { next(e); }
 });
 customerRoutes.delete('/cart/coupon', ...auth, async (req, res, next) => {
   try { sendSuccess(res, await svc.removeCartCoupon(req.user!.sub)); } catch (e) { next(e); }
 });
 customerRoutes.post('/checkout', ...auth, async (req, res, next) => {
-  try { sendSuccess(res, await svc.checkout(req.user!.sub, req.body.addressId, req.body.paymentMethod, req.body.couponCode), 201); } catch (e) { next(e); }
+  try {
+    const body = checkoutSchema.parse(req.body);
+    sendSuccess(res, await svc.checkout(req.user!.sub, body.addressId, body.paymentMethod, body.couponCode), 201);
+  } catch (e) { next(e); }
 });
 customerRoutes.get('/orders', ...auth, async (req, res, next) => {
   try {
@@ -97,16 +120,25 @@ customerRoutes.get('/profile', ...auth, async (req, res, next) => {
   try { sendSuccess(res, await svc.getProfile(req.user!.sub)); } catch (e) { next(e); }
 });
 customerRoutes.put('/profile', ...auth, async (req, res, next) => {
-  try { sendSuccess(res, await svc.updateProfile(req.user!.sub, req.body)); } catch (e) { next(e); }
+  try {
+    const body = profileSchema.parse(req.body);
+    sendSuccess(res, await svc.updateProfile(req.user!.sub, body));
+  } catch (e) { next(e); }
 });
 customerRoutes.get('/addresses', ...auth, async (req, res, next) => {
   try { sendSuccess(res, await svc.listAddresses(req.user!.sub)); } catch (e) { next(e); }
 });
 customerRoutes.post('/addresses', ...auth, async (req, res, next) => {
-  try { sendSuccess(res, await svc.createAddress(req.user!.sub, req.body), 201); } catch (e) { next(e); }
+  try {
+    const body = addressSchema.parse(req.body);
+    sendSuccess(res, await svc.createAddress(req.user!.sub, body), 201);
+  } catch (e) { next(e); }
 });
 customerRoutes.put('/addresses/:id', ...auth, async (req, res, next) => {
-  try { sendSuccess(res, await svc.updateAddress(req.user!.sub, paramId(req), req.body)); } catch (e) { next(e); }
+  try {
+    const body = addressSchema.partial().parse(req.body);
+    sendSuccess(res, await svc.updateAddress(req.user!.sub, paramId(req), body));
+  } catch (e) { next(e); }
 });
 customerRoutes.delete('/addresses/:id', ...auth, async (req, res, next) => {
   try { await svc.deleteAddress(req.user!.sub, paramId(req)); sendSuccess(res, { deleted: true }); } catch (e) { next(e); }
@@ -118,13 +150,19 @@ customerRoutes.get('/wishlist', ...auth, async (req, res, next) => {
   try { sendSuccess(res, await svc.getWishlist(req.user!.sub)); } catch (e) { next(e); }
 });
 customerRoutes.post('/wishlist', ...auth, async (req, res, next) => {
-  try { sendSuccess(res, await svc.addWishlist(req.user!.sub, req.body.productId), 201); } catch (e) { next(e); }
+  try {
+    const body = wishlistSchema.parse(req.body);
+    sendSuccess(res, await svc.addWishlist(req.user!.sub, body.productId), 201);
+  } catch (e) { next(e); }
 });
 customerRoutes.delete('/wishlist/:productId', ...auth, async (req, res, next) => {
   try { await svc.removeWishlist(req.user!.sub, paramId(req, 'productId')); sendSuccess(res, { deleted: true }); } catch (e) { next(e); }
 });
 customerRoutes.post('/reviews', ...auth, async (req, res, next) => {
-  try { sendSuccess(res, await svc.createReview(req.user!.sub, req.body.orderId, req.body.rating, req.body.comment, req.body.productId), 201); } catch (e) { next(e); }
+  try {
+    const body = reviewSchema.parse(req.body);
+    sendSuccess(res, await svc.createReview(req.user!.sub, body.orderId, body.rating, body.comment, body.productId), 201);
+  } catch (e) { next(e); }
 });
 customerRoutes.get('/notifications', ...auth, async (req, res, next) => {
   try { sendSuccess(res, await svc.getNotifications(req.user!.sub)); } catch (e) { next(e); }
@@ -136,7 +174,10 @@ customerRoutes.get('/wallet', ...auth, async (req, res, next) => {
   try { sendSuccess(res, await svc.getWallet(req.user!.sub)); } catch (e) { next(e); }
 });
 customerRoutes.post('/support/tickets', ...auth, async (req, res, next) => {
-  try { sendSuccess(res, await svc.createTicket(req.user!.sub, req.body.subject, req.body.message, req.body.orderId), 201); } catch (e) { next(e); }
+  try {
+    const body = supportTicketSchema.parse(req.body);
+    sendSuccess(res, await svc.createTicket(req.user!.sub, body.subject, body.message, body.orderId), 201);
+  } catch (e) { next(e); }
 });
 customerRoutes.get('/support/tickets', ...auth, async (req, res, next) => {
   try { sendSuccess(res, await svc.listTickets(req.user!.sub)); } catch (e) { next(e); }
