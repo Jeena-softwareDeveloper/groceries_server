@@ -32,7 +32,7 @@ export const authRateLimiter = rateLimit({
 
 export const otpRateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 5,
+  max: 50,
   standardHeaders: true,
   legacyHeaders: false,
   store: createStore('otp'),

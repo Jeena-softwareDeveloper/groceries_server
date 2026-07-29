@@ -19,6 +19,7 @@ import { swaggerSpec } from './docs/swagger.js';
 
 export function createApp() {
   const app = express();
+  app.set('trust proxy', 1); // Trust first proxy (Cloudflare/Nginx/AWS) to get correct real client IPs
   const allowedOrigins = env.CORS_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean);
 
   app.use(helmet());
