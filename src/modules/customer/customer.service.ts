@@ -715,8 +715,8 @@ export async function createAddress(
       city: data.city.trim(),
       state: data.state.trim(),
       pincode: data.pincode.trim(),
-      lat: data.lat ?? null,
-      lng: data.lng ?? null,
+      latitude: data.lat ?? null,
+      longitude: data.lng ?? null,
       isDefault: data.isDefault ?? false,
     },
   });
