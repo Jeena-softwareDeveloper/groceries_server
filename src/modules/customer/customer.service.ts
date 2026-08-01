@@ -94,6 +94,7 @@ export async function getHomeFeed(districtIdInput: string, areaId?: string) {
         sellingPrice: true,
         unit: true,
         weight: true,
+        categoryId: true,
         images: { where: { isPrimary: true }, take: 1, select: { url: true } },
         vendor: { select: { shopName: true } }
       },
