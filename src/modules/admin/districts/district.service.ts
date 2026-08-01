@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { prisma } from '../../../lib/prisma.js';
-import { NotFoundError } from '../../../utils/errors.js';
+import { NotFoundError, ValidationError } from '../../../utils/errors.js';
 
 const districtSchema = z.object({
   name: z.string().min(2),
@@ -46,5 +46,12 @@ export async function updateDistrict(id: string, data: Partial<z.infer<typeof di
 
 export async function deleteDistrict(id: string) {
   await getDistrict(id);
+  
+  const vendorCount = await prisma.vendor.count({ where: { districtId: id } });
+  if (vendorCount > 0) throw new ValidationError(`Cannot delete district because it has ${vendorCount} vendors associated with it.`);
+  
+  const areaCount = await prisma.area.count({ where: { districtId: id } });
+  if (areaCount > 0) throw new ValidationError(`Cannot delete district because it has ${areaCount} areas associated with it.`);
+
   await prisma.district.delete({ where: { id } });
 }
