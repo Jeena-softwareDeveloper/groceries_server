@@ -88,3 +88,8 @@ export async function suspendVendor(id: string) {
   await getVendor(id);
   return prisma.vendor.update({ where: { id }, data: { status: 'SUSPENDED' } });
 }
+
+export async function removeVendor(id: string) {
+  await getVendor(id);
+  return prisma.vendor.delete({ where: { id } });
+}

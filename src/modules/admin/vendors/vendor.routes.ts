@@ -9,3 +9,4 @@ vendorAdminRoutes.put('/:id', ctrl.update);
 vendorAdminRoutes.post('/:id/approve', ctrl.approve);
 vendorAdminRoutes.post('/:id/reject', ctrl.reject);
 vendorAdminRoutes.post('/:id/suspend', ctrl.suspend);
+vendorAdminRoutes.delete('/:id', ctrl.remove);

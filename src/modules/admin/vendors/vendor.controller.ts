@@ -56,3 +56,12 @@ export async function suspend(req: Request, res: Response, next: NextFunction) {
     next(e);
   }
 }
+
+export async function remove(req: Request, res: Response, next: NextFunction) {
+  try {
+    await service.removeVendor(paramId(req));
+    sendSuccess(res, null);
+  } catch (e) {
+    next(e);
+  }
+}
