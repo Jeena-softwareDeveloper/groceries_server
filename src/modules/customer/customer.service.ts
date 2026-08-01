@@ -263,14 +263,18 @@ export async function search(q: string, districtIdInput?: string, scope?: string
   if (!query) return { products: [], shops: [], categories: [] };
   const districtId = districtIdInput ? await resolveDistrictId(districtIdInput) : undefined;
   await prisma.searchLog.create({ data: { query, districtId, customerId } });
+
+  const isPg = process.env.DATABASE_URL?.startsWith('postgres');
+  const modeObj = isPg ? { mode: 'insensitive' } : {};
+
   const productWhere = {
     status: 'PUBLISHED' as const,
     OR: [
-      { name: { contains: query } },
-      { brand: { contains: query } },
+      { name: { contains: query, ...modeObj } },
+      { brand: { contains: query, ...modeObj } },
     ],
     ...(districtId ? { vendor: { districtId } } : {}),
-  };
+  } as any;
 
   const [products, shops, categories] = await Promise.all([
     scope === 'shops' ? [] : prisma.product.findMany({ 
@@ -287,7 +291,7 @@ export async function search(q: string, districtIdInput?: string, scope?: string
       }
     }),
     scope === 'products' ? [] : prisma.vendor.findMany({ 
-      where: { shopName: { contains: query }, status: 'APPROVED', ...(districtId ? { districtId } : {}) }, 
+      where: { shopName: { contains: query, ...modeObj }, status: 'APPROVED', ...(districtId ? { districtId } : {}) } as any, 
       take: 10,
       select: {
         id: true,
@@ -298,7 +302,7 @@ export async function search(q: string, districtIdInput?: string, scope?: string
       }
     }),
     scope === 'products' || scope === 'shops' ? [] : prisma.category.findMany({ 
-      where: { name: { contains: query } }, 
+      where: { name: { contains: query, ...modeObj } } as any, 
       take: 5,
       select: { id: true, name: true, imageUrl: true }
     }),
