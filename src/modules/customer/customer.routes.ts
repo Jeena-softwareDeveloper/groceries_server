@@ -53,6 +53,12 @@ customerRoutes.get('/shops/:id', async (req, res, next) => {
 customerRoutes.get('/shops/:id/products', async (req, res, next) => {
   try { sendSuccess(res, await svc.getShopProducts(paramId(req), req.query.categoryId as string)); } catch (e) { next(e); }
 });
+customerRoutes.get('/products', async (req, res, next) => {
+  try {
+    const { categoryId, districtId, sort, page, limit } = req.query as Record<string, string>;
+    sendSuccess(res, await svc.listProducts(categoryId, districtId, sort, Number(page) || 1, Number(limit) || 20));
+  } catch (e) { next(e); }
+});
 customerRoutes.get('/products/:id', async (req, res, next) => {
   try { sendSuccess(res, await svc.getProduct(paramId(req), req.user)); } catch (e) { next(e); }
 });

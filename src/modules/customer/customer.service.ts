@@ -258,6 +258,48 @@ export async function getProduct(productId: string, user?: { role: string; sub: 
   return { ...product, relatedProducts };
 }
 
+// ─── Product List ───────────────────────────────────────────────────────────────
+export async function listProducts(categoryId?: string, districtIdInput?: string, sort?: string, page = 1, limit = 20) {
+  const districtId = districtIdInput ? await resolveDistrictId(districtIdInput) : undefined;
+  const skip = (page - 1) * limit;
+  const orderBy: any =
+    sort === 'price_asc' ? { sellingPrice: 'asc' } :
+    sort === 'price_desc' ? { sellingPrice: 'desc' } :
+    sort === 'name' ? { name: 'asc' } :
+    { createdAt: 'desc' };
+
+  const where: any = {
+    status: 'PUBLISHED',
+    isActive: true,
+    ...(districtId ? { vendor: { districtId, status: 'APPROVED' } } : {}),
+    ...(categoryId ? { categoryId } : {}),
+  };
+
+  const [products, total] = await Promise.all([
+    prisma.product.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        mrp: true,
+        sellingPrice: true,
+        unit: true,
+        weight: true,
+        categoryId: true,
+        images: { where: { isPrimary: true }, take: 1, select: { url: true } },
+        vendor: { select: { shopName: true, id: true } },
+        category: { select: { name: true } },
+      },
+      orderBy,
+      skip,
+      take: limit,
+    }),
+    prisma.product.count({ where }),
+  ]);
+
+  return { products, total, page, limit, totalPages: Math.ceil(total / limit) };
+}
+
 // ─── Search ────────────────────────────────────────────────────────────────────
 export async function search(q: string, districtIdInput?: string, scope?: string, customerId?: string) {
   const query = q.trim();
