@@ -213,7 +213,7 @@ export async function createProduct(vendorId: string, data: ProductInput) {
       status: 'DRAFT',
       tags: Array.isArray(tags) ? tags.join(',') : (typeof tags === 'string' ? tags : null),
       inventory: { create: { stock: stock ?? 0 } },
-      ...(images?.length ? { images: { create: images.map((img, i) => ({ url: img, isPrimary: i === 0, sortOrder: i })) } } : {}),
+      ...(images?.length ? { images: { create: images.map((img, i) => ({ url: img.url, isPrimary: img.isPrimary ?? (i === 0), sortOrder: i })) } } : {}),
     },
     include: { inventory: true, category: true, images: true },
   });

@@ -31,7 +31,13 @@ export const productSchema = z.object({
   hsnCode: z.string().optional().nullable(),
   tags: z.string().optional().nullable(),
   stock: z.number().int().min(0).optional(),
-  images: z.array(z.string().url('Invalid image URL')).optional(),
+  images: z.array(
+    z.object({
+      id: z.string().optional().nullable(),
+      url: z.string().url('Invalid image URL'),
+      isPrimary: z.boolean().optional(),
+    })
+  ).optional(),
 });
 
 export const offerSchema = z.object({
