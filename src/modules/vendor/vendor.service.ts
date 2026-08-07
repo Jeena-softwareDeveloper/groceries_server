@@ -284,9 +284,9 @@ export async function submitProductForApproval(vendorId: string, productId: stri
     // Update product status to PENDING_REVIEW
     await tx.product.update({ where: { id: productId }, data: { status: 'PENDING_REVIEW' } });
 
-    // Create or update approval request
+    // Find any existing approval request to prevent duplicate rows in admin
     const existing = await tx.productApproval.findFirst({
-      where: { productId, status: { in: ['PENDING', 'CHANGES_REQUESTED'] } },
+      where: { productId },
     });
 
     if (existing) {
