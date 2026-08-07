@@ -72,8 +72,16 @@ async function setCartCouponCode(customerId: string, code: string | null) {
 export async function getHomeFeed(districtIdInput: string, areaId?: string) {
   const districtId = await resolveDistrictId(districtIdInput);
   const cacheKey = `home:feed:${districtId}:${areaId ?? 'all'}`;
+  
+  console.log(`\n[HOME FEED DEBUG] Request starting for input district: ${districtIdInput}, resolved district: ${districtId}, area: ${areaId}`);
+
   const cached = await cacheGet<unknown>(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    console.log(`[HOME FEED DEBUG] Cache HIT for key: ${cacheKey}`);
+    return cached;
+  }
+  
+  console.log(`[HOME FEED DEBUG] Cache MISS. Querying DB...`);
 
   const now = new Date();
   const [banners, microBanners, categories, vendors, trendingProducts, offers, layoutSetting, deliveryRules] = await Promise.all([
@@ -105,6 +113,15 @@ export async function getHomeFeed(districtIdInput: string, areaId?: string) {
     prisma.appSetting.findUnique({ where: { key: 'HOME_PAGE_LAYOUT' } }),
     prisma.deliveryChargeRule.findFirst({ where: { OR: [{ districtId }, { districtId: null }], isActive: true } })
   ]);
+
+  console.log(`[HOME FEED DEBUG] DB Query Complete.`);
+  console.log(`[HOME FEED DEBUG] Banners: ${banners.length}, Categories: ${categories.length}, Vendors: ${vendors.length}`);
+  console.log(`[HOME FEED DEBUG] Trending Products count: ${trendingProducts.length}`);
+  if (trendingProducts.length > 0) {
+    console.log(`[HOME FEED DEBUG] Trending Products sample:`, JSON.stringify(trendingProducts.slice(0, 2), null, 2));
+  } else {
+    console.log(`[HOME FEED DEBUG] NO trending products found for where: { status: 'PUBLISHED', isActive: true, vendor: { districtId: '${districtId}', status: 'APPROVED' } }`);
+  }
 
   const feed = {
     banners, microBanners, categories, nearbyShops: vendors,
