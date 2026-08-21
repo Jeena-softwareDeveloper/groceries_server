@@ -16,12 +16,11 @@ export async function getVendorProfile(vendorId: string) {
 }
 
 export async function updateVendorProfile(vendorId: string, data: VendorProfileUpdate) {
-  const allowed = ['shopName', 'description', 'logoUrl', 'bannerUrl', 'address', 'phone', 'minOrderValue', 'deliveryRadius', 'isOpen', 'operatingHours'];
+  const allowed = ['shopName', 'description', 'logoUrl', 'bannerUrl', 'address', 'phone', 'districtId', 'areaId', 'minOrderValue', 'deliveryRadius', 'isOpen', 'operatingHours'];
   const filtered = Object.fromEntries(Object.entries(data).filter(([k]) => allowed.includes(k)));
   return prisma.vendor.update({ where: { id: vendorId }, data: filtered });
 }
 
-// ─── Dashboard ───────────────────────────────────────────────────────────────
 
 export async function getVendorDashboard(vendorId: string) {
   const now = new Date();
@@ -38,33 +37,27 @@ export async function getVendorDashboard(vendorId: string) {
     vendor, notifCount,
     pendingApprovals, rejectedApprovals,
   ] = await Promise.all([
-    // Sales aggregations
     prisma.order.aggregate({ where: { vendorId, createdAt: { gte: todayStart }, status: { not: 'CANCELLED' } }, _sum: { grandTotal: true }, _count: true }),
     prisma.order.aggregate({ where: { vendorId, createdAt: { gte: weekStart }, status: { not: 'CANCELLED' } }, _sum: { grandTotal: true }, _count: true }),
     prisma.order.aggregate({ where: { vendorId, createdAt: { gte: monthStart }, status: { not: 'CANCELLED' } }, _sum: { grandTotal: true }, _count: true }),
     prisma.order.aggregate({ where: { vendorId, status: { not: 'CANCELLED' } }, _sum: { grandTotal: true } }),
 
-    // Order status breakdown
     prisma.order.groupBy({ by: ['status'], where: { vendorId }, _count: true }),
 
-    // Product status breakdown
     prisma.product.groupBy({ by: ['status'], where: { vendorId }, _count: true }),
 
-    // Low stock (> 0 but <= 10)
     prisma.inventory.findMany({
       where: { product: { vendorId }, stock: { gt: 0, lte: 10 } },
       include: { product: { select: { id: true, name: true } } },
       take: 10,
     }),
 
-    // Out of stock
     prisma.inventory.findMany({
       where: { product: { vendorId }, stock: { lte: 0 } },
       include: { product: { select: { id: true, name: true } } },
       take: 10,
     }),
 
-    // Recent orders
     prisma.order.findMany({
       where: { vendorId },
       take: 10,
@@ -75,7 +68,6 @@ export async function getVendorDashboard(vendorId: string) {
       },
     }),
 
-    // Best selling products (by order item count)
     prisma.orderItem.groupBy({
       by: ['productId'],
       where: { order: { vendorId, status: { not: 'CANCELLED' } } },

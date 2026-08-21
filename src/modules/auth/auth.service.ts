@@ -12,6 +12,7 @@ import {
   verifyRefreshToken,
   type JwtPayload,
 } from '../../lib/jwt.js';
+import twilio from 'twilio';
 import { ForbiddenError, UnauthorizedError, ValidationError } from '../../utils/errors.js';
 import type { UserRole } from '../../types/index.js';
 
@@ -71,33 +72,24 @@ export async function requestCustomerOtp(phone: string): Promise<{ message: stri
 
   // Skip SMS for test number so production login always works with fixed OTP
   const shouldSendSms =
-    !!env.SMS_PROVIDER_API_KEY &&
+    !!(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_PHONE_NUMBER) &&
     env.NODE_ENV !== 'development' &&
     !isTestPhone(normalized);
 
   if (shouldSendSms) {
     try {
-      await fetch('https://www.fast2sms.com/dev/bulkV2', {
-        method: 'POST',
-        headers: {
-          authorization: env.SMS_PROVIDER_API_KEY!,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          route: 'v3',
-          sender_id: 'FTWSMS',
-          message: `Your All Time Market OTP is ${otp}`,
-          language: 'english',
-          flash: 0,
-          numbers: normalized,
-        }),
+      const client = twilio(env.TWILIO_ACCOUNT_SID!, env.TWILIO_AUTH_TOKEN!);
+      await client.messages.create({
+        body: `Your All Time Market OTP is ${otp}`,
+        from: env.TWILIO_PHONE_NUMBER,
+        to: `+91${normalized}`,
       });
     } catch (e) {
-      console.error('SMS Provider error', e);
+      console.error('Twilio SMS error', e);
       throw new ValidationError('Failed to send OTP. Please try again.');
     }
   } else if (env.NODE_ENV !== 'development' && !isTestPhone(normalized)) {
-    console.warn('SMS_PROVIDER_API_KEY missing — OTP generated but not sent for', normalized);
+    console.warn('Twilio credentials missing — OTP generated but not sent for', normalized);
   }
 
   return {
