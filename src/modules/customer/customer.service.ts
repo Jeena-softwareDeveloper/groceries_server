@@ -69,59 +69,62 @@ async function setCartCouponCode(customerId: string, code: string | null) {
 }
 
 // ─── Home Feed ─────────────────────────────────────────────────────────────────
-export async function getHomeFeed(districtIdInput: string, areaId?: string) {
-  const districtId = await resolveDistrictId(districtIdInput);
-  const cacheKey = `home:feed:${districtId}:${areaId ?? 'all'}`;
-  
-  console.log(`\n[HOME FEED DEBUG] Request starting for input district: ${districtIdInput}, resolved district: ${districtId}, area: ${areaId}`);
+function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
 
-  const cached = await cacheGet<unknown>(cacheKey);
-  if (cached) {
-    console.log(`[HOME FEED DEBUG] Cache HIT for key: ${cacheKey}`);
-    return cached;
-  }
+export async function getHomeFeed(districtIdInput: string, areaId?: string, lat?: number, lng?: number) {
+  const districtId = await resolveDistrictId(districtIdInput);
+  const cacheKey = `home:feed:${districtId}:${areaId ?? 'all'}:${lat ?? 0}:${lng ?? 0}`;
   
-  console.log(`[HOME FEED DEBUG] Cache MISS. Querying DB...`);
+  const cached = await cacheGet<unknown>(cacheKey);
+  if (cached) return cached;
+  
+  const allVendors = await prisma.vendor.findMany({
+    where: { districtId, status: 'APPROVED', isOpen: true },
+    select: { id: true, shopName: true, slug: true, logoUrl: true, bannerUrl: true, rating: true, minOrderValue: true, latitude: true, longitude: true, deliveryRadius: true, areaId: true },
+  });
+
+  let filteredVendors = allVendors;
+  if (lat && lng) {
+    filteredVendors = allVendors.filter(v => {
+      if (v.latitude == null || v.longitude == null) return false;
+      const distance = calculateDistance(lat, lng, v.latitude, v.longitude);
+      return distance <= v.deliveryRadius;
+    });
+  } else if (areaId) {
+    filteredVendors = allVendors.filter(v => v.areaId === areaId);
+  }
+
+  const vendors = filteredVendors.slice(0, 10);
+  const vendorIds = vendors.map(v => v.id);
 
   const now = new Date();
-  const [banners, microBanners, categories, vendors, trendingProducts, offers, layoutSetting, deliveryRules] = await Promise.all([
+  const [banners, microBanners, categories, trendingProducts, offers, layoutSetting, deliveryRules] = await Promise.all([
     prisma.banner.findMany({ where: { OR: [{ districtId }, { districtId: null }], isActive: true }, orderBy: { sortOrder: 'asc' }, take: 5 }),
     prisma.microBanner.findMany({ where: { OR: [{ districtId }, { districtId: null }], isActive: true }, take: 3 }),
     prisma.category.findMany({ where: { parentId: null, isActive: true }, orderBy: { sortOrder: 'asc' }, take: 12 }),
-    prisma.vendor.findMany({
-      where: { districtId, status: 'APPROVED', isOpen: true, ...(areaId ? { areaId } : {}) },
-      take: 10,
-      select: { id: true, shopName: true, slug: true, logoUrl: true, bannerUrl: true, rating: true, minOrderValue: true },
-    }),
-    prisma.product.findMany({
-      where: { status: 'PUBLISHED', isActive: true, vendor: { districtId, status: 'APPROVED' } },
+    vendorIds.length > 0 ? prisma.product.findMany({
+      where: { status: 'PUBLISHED', isActive: true, vendorId: { in: vendorIds } },
       select: {
-        id: true,
-        name: true,
-        mrp: true,
-        sellingPrice: true,
-        unit: true,
-        weight: true,
-        categoryId: true,
+        id: true, name: true, mrp: true, sellingPrice: true, unit: true, weight: true, categoryId: true,
         images: { where: { isPrimary: true }, take: 1, select: { url: true } },
         vendor: { select: { shopName: true } }
       },
       orderBy: { createdAt: 'desc' },
       take: 12,
-    }),
+    }) : Promise.resolve([]),
     prisma.offer.findMany({ where: { isActive: true, OR: [{ districtId }, { districtId: null }] }, take: 5 }),
     prisma.appSetting.findUnique({ where: { key: 'HOME_PAGE_LAYOUT' } }),
     prisma.deliveryChargeRule.findFirst({ where: { OR: [{ districtId }, { districtId: null }], isActive: true } })
   ]);
-
-  console.log(`[HOME FEED DEBUG] DB Query Complete.`);
-  console.log(`[HOME FEED DEBUG] Banners: ${banners.length}, Categories: ${categories.length}, Vendors: ${vendors.length}`);
-  console.log(`[HOME FEED DEBUG] Trending Products count: ${trendingProducts.length}`);
-  if (trendingProducts.length > 0) {
-    console.log(`[HOME FEED DEBUG] Trending Products sample:`, JSON.stringify(trendingProducts.slice(0, 2), null, 2));
-  } else {
-    console.log(`[HOME FEED DEBUG] NO trending products found for where: { status: 'PUBLISHED', isActive: true, vendor: { districtId: '${districtId}', status: 'APPROVED' } }`);
-  }
 
   const feed = {
     banners, microBanners, categories, nearbyShops: vendors,
@@ -161,25 +164,32 @@ export async function listCategories() {
   });
 }
 
-export async function listShops(districtIdInput: string, areaId?: string, categoryId?: string) {
+export async function listShops(districtIdInput: string, areaId?: string, categoryId?: string, lat?: number, lng?: number) {
   const districtId = await resolveDistrictId(districtIdInput);
-  return prisma.vendor.findMany({    where: {
+  const allVendors = await prisma.vendor.findMany({
+    where: {
       districtId, status: 'APPROVED',
-      ...(areaId ? { areaId } : {}),
       ...(categoryId ? { products: { some: { categoryId, status: 'PUBLISHED' } } } : {}),
     },
     select: {
-      id: true,
-      shopName: true,
-      logoUrl: true,
-      bannerUrl: true,
-      rating: true,
-      minOrderValue: true,
-      address: true,
-      area: { select: { name: true } },
+      id: true, shopName: true, logoUrl: true, bannerUrl: true, rating: true, minOrderValue: true, address: true,
+      areaId: true, area: { select: { name: true } }, latitude: true, longitude: true, deliveryRadius: true
     },
     orderBy: { rating: 'desc' },
   });
+
+  let filteredVendors = allVendors;
+  if (lat && lng) {
+    filteredVendors = allVendors.filter(v => {
+      if (v.latitude == null || v.longitude == null) return false;
+      const distance = calculateDistance(lat, lng, v.latitude, v.longitude);
+      return distance <= v.deliveryRadius;
+    });
+  } else if (areaId) {
+    filteredVendors = allVendors.filter(v => v.areaId === areaId);
+  }
+
+  return filteredVendors;
 }
 
 export async function getShop(vendorId: string) {

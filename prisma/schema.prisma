@@ -95,6 +95,8 @@ model Vendor {
   logoUrl         String?
   bannerUrl       String?
   address         String
+  latitude        Float?
+  longitude       Float?
   phone           String
   fssaiNumber     String?
   gstNumber       String?

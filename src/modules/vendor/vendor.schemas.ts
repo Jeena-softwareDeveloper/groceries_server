@@ -9,6 +9,8 @@ export const vendorProfileSchema = z.object({
   logoUrl: z.string().url('Invalid URL').optional().nullable(),
   bannerUrl: z.string().url('Invalid URL').optional().nullable(),
   address: z.string().min(5, 'Address is too short').optional(),
+  latitude: z.number().optional().nullable(),
+  longitude: z.number().optional().nullable(),
   phone: z.string().min(10, 'Invalid phone number').optional(),
   districtId: z.string().optional().nullable(),
   areaId: z.string().optional().nullable(),

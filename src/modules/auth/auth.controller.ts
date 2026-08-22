@@ -8,7 +8,12 @@ const indianPhone = z
   .transform((v) => v.replace(/\D/g, '').slice(-10))
   .refine((v) => /^[6-9]\d{9}$/.test(v), 'Enter a valid 10-digit Indian mobile number');
 
-const otpRequestSchema = z.object({ phone: indianPhone });
+const otpRequestSchema = z.object({
+  phone: indianPhone,
+  deviceId: z.string().optional(),
+  deviceModel: z.string().optional(),
+  osVersion: z.string().optional(),
+});
 const otpVerifySchema = z.object({
   phone: indianPhone,
   otp: z.string().regex(/^\d{6}$/, 'OTP must be 6 digits'),
@@ -22,8 +27,9 @@ const switchSchema = z.object({ deviceId: z.string().optional(), deviceModel: z.
 
 export async function customerOtpRequest(req: Request, res: Response, next: NextFunction) {
   try {
-    const { phone } = otpRequestSchema.parse(req.body);
-    const result = await authService.requestCustomerOtp(phone);
+    const { phone, deviceId, deviceModel, osVersion } = otpRequestSchema.parse(req.body);
+    const deviceName = req.headers['user-agent'];
+    const result = await authService.requestCustomerOtp(phone, deviceName, req.ip, deviceId, deviceModel, osVersion);
     sendSuccess(res, result);
   } catch (err) {
     next(err);

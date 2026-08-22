@@ -56,47 +56,73 @@ function generateOtp(phone: string): string {
   return String(randomInt(100000, 999999));
 }
 
-export async function requestCustomerOtp(phone: string): Promise<{ message: string; otp?: string }> {
+export async function requestCustomerOtp(
+  phone: string,
+  deviceName?: string,
+  ipAddress?: string,
+  deviceId?: string,
+  deviceModel?: string,
+  osVersion?: string
+): Promise<{ message: string; otp?: string; autoLogin?: boolean; tokens?: any }> {
   const normalized = assertValidPhone(phone);
+
+  if (deviceId) {
+    const customer = await prisma.customer.findUnique({ where: { phone: normalized } });
+    if (customer) {
+      if (customer.isBlocked) throw new ForbiddenError('Account is blocked');
+      
+      const trustedSession = await prisma.refreshToken.findFirst({
+        where: { userId: customer.id, deviceId, expiresAt: { gt: new Date() } },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      if (trustedSession) {
+        const tokens = await issueTokens({ sub: customer.id, role: 'CUSTOMER' }, deviceName, ipAddress, deviceId, deviceModel, osVersion);
+        return { message: 'Trusted device login successful', autoLogin: true, tokens };
+      }
+    }
+  }
 
   await prisma.otpSession.deleteMany({ where: { phone: normalized } });
 
-  const otp = generateOtp(normalized);
-  await prisma.otpSession.create({
-    data: {
-      phone: normalized,
-      otp,
-      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-    },
-  });
-
-  // Skip SMS for test number so production login always works with fixed OTP
+  // Send SMS for all numbers except the hardcoded test phone
   const shouldSendSms =
-    !!(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_PHONE_NUMBER) &&
-    env.NODE_ENV !== 'development' &&
+    !!(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_VERIFY_SERVICE_SID) &&
     !isTestPhone(normalized);
 
   if (shouldSendSms) {
     try {
       const client = twilio(env.TWILIO_ACCOUNT_SID!, env.TWILIO_AUTH_TOKEN!);
-      await client.messages.create({
-        body: `Your All Time Market OTP is ${otp}`,
-        from: env.TWILIO_PHONE_NUMBER,
+      await client.verify.v2.services(env.TWILIO_VERIFY_SERVICE_SID!).verifications.create({
         to: `+91${normalized}`,
+        channel: 'sms'
       });
     } catch (e) {
-      console.error('Twilio SMS error', e);
+      console.error('Twilio Verify error', e);
       throw new ValidationError('Failed to send OTP. Please try again.');
     }
-  } else if (env.NODE_ENV !== 'development' && !isTestPhone(normalized)) {
-    console.warn('Twilio credentials missing — OTP generated but not sent for', normalized);
-  }
+    
+    return { message: 'OTP sent successfully' };
+  } else {
+    if (env.NODE_ENV !== 'development' && !isTestPhone(normalized)) {
+      console.warn('Twilio Verify credentials missing — OTP generated but not sent for', normalized);
+    }
+    
+    const otp = generateOtp(normalized);
+    await prisma.otpSession.create({
+      data: {
+        phone: normalized,
+        otp,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      },
+    });
 
-  return {
-    message: 'OTP sent successfully',
-    // Expose OTP only in development, or for the temporary test phone
-    ...((env.NODE_ENV === 'development' || isTestPhone(normalized)) ? { otp } : {}),
-  };
+    return {
+      message: 'OTP sent successfully',
+      // Expose OTP only in development, or for the temporary test phone
+      ...((env.NODE_ENV === 'development' || isTestPhone(normalized)) ? { otp } : {}),
+    };
+  }
 }
 
 export async function verifyCustomerOtp(phone: string, otp: string, deviceName?: string, ipAddress?: string, deviceId?: string, deviceModel?: string, osVersion?: string) {
@@ -106,26 +132,48 @@ export async function verifyCustomerOtp(phone: string, otp: string, deviceName?:
     throw new ValidationError('Invalid OTP');
   }
 
-  const session = await prisma.otpSession.findFirst({
-    where: { phone: normalized },
-    orderBy: { createdAt: 'desc' },
-  });
+  const shouldSendSms =
+    !!(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_VERIFY_SERVICE_SID) &&
+    !isTestPhone(normalized);
 
-  if (!session) throw new ValidationError('OTP expired or not found');
-  if (session.expiresAt < new Date()) throw new ValidationError('OTP expired');
-  if (session.attempts >= 5) throw new ValidationError('Too many attempts');
-  if (session.otp !== otp) {
-    await prisma.otpSession.update({
-      where: { id: session.id },
-      data: { attempts: { increment: 1 } },
+  if (shouldSendSms) {
+    try {
+      const client = twilio(env.TWILIO_ACCOUNT_SID!, env.TWILIO_AUTH_TOKEN!);
+      const verification = await client.verify.v2.services(env.TWILIO_VERIFY_SERVICE_SID!).verificationChecks.create({
+        to: `+91${normalized}`,
+        code: otp
+      });
+      if (verification.status !== 'approved') {
+        throw new ValidationError('Invalid OTP');
+      }
+    } catch (e) {
+      console.error('Twilio Verify check error', e);
+      throw new ValidationError('Invalid OTP');
+    }
+  } else {
+    const session = await prisma.otpSession.findFirst({
+      where: { phone: normalized },
+      orderBy: { createdAt: 'desc' },
     });
-    throw new ValidationError('Invalid OTP');
+
+    if (!session) throw new ValidationError('OTP expired or not found');
+    if (session.expiresAt < new Date()) throw new ValidationError('OTP expired');
+    if (session.attempts >= 5) throw new ValidationError('Too many attempts');
+    if (session.otp !== otp) {
+      await prisma.otpSession.update({
+        where: { id: session.id },
+        data: { attempts: { increment: 1 } },
+      });
+      throw new ValidationError('Invalid OTP');
+    }
+
+    await prisma.otpSession.delete({ where: { id: session.id } });
   }
 
-  await prisma.otpSession.delete({ where: { id: session.id } });
-
   let customer = await prisma.customer.findUnique({ where: { phone: normalized } });
+  let isNewUser = false;
   if (!customer) {
+    isNewUser = true;
     customer = await prisma.customer.create({
       data: {
         phone: normalized,
@@ -136,7 +184,8 @@ export async function verifyCustomerOtp(phone: string, otp: string, deviceName?:
 
   if (customer.isBlocked) throw new ForbiddenError('Account is blocked');
 
-  return issueTokens({ sub: customer.id, role: 'CUSTOMER' }, deviceName, ipAddress, deviceId, deviceModel, osVersion);
+  const tokens = await issueTokens({ sub: customer.id, role: 'CUSTOMER' }, deviceName, ipAddress, deviceId, deviceModel, osVersion);
+  return { ...tokens, isNewUser };
 }
 
 export async function loginVendor(email: string, password: string, deviceName?: string, ipAddress?: string, deviceId?: string, deviceModel?: string, osVersion?: string) {

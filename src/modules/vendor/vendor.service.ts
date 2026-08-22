@@ -16,7 +16,7 @@ export async function getVendorProfile(vendorId: string) {
 }
 
 export async function updateVendorProfile(vendorId: string, data: VendorProfileUpdate) {
-  const allowed = ['shopName', 'description', 'logoUrl', 'bannerUrl', 'address', 'phone', 'districtId', 'areaId', 'minOrderValue', 'deliveryRadius', 'isOpen', 'operatingHours'];
+  const allowed = ['shopName', 'description', 'logoUrl', 'bannerUrl', 'address', 'latitude', 'longitude', 'phone', 'districtId', 'areaId', 'minOrderValue', 'deliveryRadius', 'isOpen', 'operatingHours'];
   const filtered = Object.fromEntries(Object.entries(data).filter(([k]) => allowed.includes(k)));
   return prisma.vendor.update({ where: { id: vendorId }, data: filtered });
 }

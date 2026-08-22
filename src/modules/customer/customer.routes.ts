@@ -23,7 +23,9 @@ export const customerRoutes = Router();
 customerRoutes.use(optionalAuthenticate);
 customerRoutes.get('/home/feed', async (req, res, next) => {
   try {
-    sendSuccess(res, await svc.getHomeFeed(req.query.districtId as string, req.query.areaId as string));
+    const lat = req.query.lat ? parseFloat(req.query.lat as string) : undefined;
+    const lng = req.query.lng ? parseFloat(req.query.lng as string) : undefined;
+    sendSuccess(res, await svc.getHomeFeed(req.query.districtId as string, req.query.areaId as string, lat, lng));
   } catch (e) { next(e); }
 });
 customerRoutes.get('/districts', async (_req, res, next) => {
@@ -44,7 +46,9 @@ customerRoutes.get('/categories', async (_req, res, next) => {
 });
 customerRoutes.get('/shops', async (req, res, next) => {
   try {
-    sendSuccess(res, await svc.listShops(req.query.districtId as string, req.query.areaId as string, req.query.categoryId as string));
+    const lat = req.query.lat ? parseFloat(req.query.lat as string) : undefined;
+    const lng = req.query.lng ? parseFloat(req.query.lng as string) : undefined;
+    sendSuccess(res, await svc.listShops(req.query.districtId as string, req.query.areaId as string, req.query.categoryId as string, lat, lng));
   } catch (e) { next(e); }
 });
 customerRoutes.get('/shops/:id', async (req, res, next) => {
