@@ -16,10 +16,7 @@ const envSchema = z.object({
   JWT_ACCESS_SECRET: z.string().min(32),
   JWT_REFRESH_SECRET: z.string().min(32),
   JWT_ACCESS_EXPIRES_IN: z.string().default('15m'),
-  JWT_REFRESH_EXPIRES_IN: z.string().default('365d'),
-  CLOUDINARY_CLOUD_NAME: z.string().optional(),
-  CLOUDINARY_API_KEY: z.string().optional(),
-  CLOUDINARY_API_SECRET: z.string().optional(),
+  JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
   SMS_PROVIDER_API_KEY: z.string().optional(),
   TWILIO_ACCOUNT_SID: z.string().optional(),
   TWILIO_AUTH_TOKEN: z.string().optional(),
@@ -27,7 +24,13 @@ const envSchema = z.object({
   TWILIO_VERIFY_SERVICE_SID: z.string().optional(),
   RAZORPAY_KEY_ID: z.string().optional(),
   RAZORPAY_KEY_SECRET: z.string().optional(),
+
+  // FTP Config
+  FTP_HOST: z.string().optional(),
+  FTP_USER: z.string().optional(),
+  FTP_PASSWORD: z.string().optional(),
 });
+
 
 const parsed = envSchema.safeParse(process.env);
 
