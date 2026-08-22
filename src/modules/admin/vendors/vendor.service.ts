@@ -43,24 +43,30 @@ export async function getVendor(id: string) {
 export async function updateVendor(id: string, data: any) {
   await getVendor(id);
   
-  // Clean up data to only include valid updatable fields
+  const fieldMap: Record<string, string> = {
+    ownerName: 'ownerName',
+    mobileNumber: 'phone',
+    accountNumber: 'bankAccountNo',
+    ifscCode: 'bankIfsc',
+  };
+
   const updatableFields = [
-    'shopName', 'ownerName', 'email', 'mobileNumber', 'shopCategory',
-    'description', 'address', 'areaId', 'districtId', 'deliveryRadius',
-    'gstNumber', 'fssaiNumber', 'bankName', 'accountHolderName', 
-    'accountNumber', 'ifscCode', 'upiId', 'logoUrl', 'bannerUrl',
-    'ownerPhotoUrl', 'govtIdUrl', 'gstCertUrl', 'fssaiCertUrl'
+    'shopName', 'email', 'phone', 'description', 'address',
+    'areaId', 'districtId', 'deliveryRadius', 'minOrderValue',
+    'gstNumber', 'fssaiNumber', 'bankName', 'accountHolderName',
+    'bankAccountNo', 'bankIfsc', 'upiId', 'logoUrl', 'bannerUrl',
+    'ownerPhotoUrl', 'govtIdUrl', 'gstCertUrl', 'fssaiCertUrl',
+    'latitude', 'longitude', 'isOpen', 'operatingHours',
   ];
   
   const updateData: any = {};
-  for (const key of updatableFields) {
-    if (data[key] !== undefined) {
-      updateData[key] = data[key];
+
+  for (const [inputKey, value] of Object.entries(data)) {
+    const schemaKey = fieldMap[inputKey] ?? inputKey;
+    if (updatableFields.includes(schemaKey) && value !== undefined) {
+      updateData[schemaKey] = value;
     }
   }
-
-  // Handle phone separately if needed, since schema might use `phone` instead of `mobileNumber`
-  if (data.mobileNumber !== undefined) updateData.phone = data.mobileNumber;
 
   return prisma.vendor.update({
     where: { id },

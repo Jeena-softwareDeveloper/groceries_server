@@ -8,36 +8,13 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ─── Enums ───────────────────────────────────────────────────────────────────
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// ─── Geography ─────────────────────────────────────────────────────────────────
 
 model District {
   id        String   @id @default(cuid())
   name      String
   code      String   @unique
+  latitude  Float?   // district centre lat
+  longitude Float?   // district centre lng
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -56,6 +33,8 @@ model Area {
   districtId String
   name       String
   pincode    String?
+  latitude   Float?   // area centre lat
+  longitude  Float?   // area centre lng
   isActive   Boolean  @default(true)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -266,15 +245,18 @@ model Inventory {
 // ─── Customer ──────────────────────────────────────────────────────────────────
 
 model Customer {
-  id           String   @id @default(cuid())
-  phone        String   @unique
-  email        String?  @unique
-  passwordHash String?
-  name         String?
-  avatarUrl    String?
-  isBlocked    Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id               String   @id @default(cuid())
+  phone            String   @unique
+  email            String?  @unique
+  passwordHash     String?
+  name             String?
+  avatarUrl        String?
+  isBlocked        Boolean  @default(false)
+  currentLatitude  Float?
+  currentLongitude Float?
+  currentLocation  String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   addresses      Address[]
   cartItems      CartItem[]
@@ -287,7 +269,27 @@ model Customer {
   searchLogs     SearchLog[]
   supportTickets SupportTicket[]
   vendorRequests VendorRequest[]
+  deviceLocations DeviceLocation[]
 }
+
+model DeviceLocation {
+  id          String   @id @default(cuid())
+  deviceId    String   @unique
+  customerId  String?
+  displayName String
+  latitude    Float
+  longitude   Float
+  districtId  String?
+  areaId      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([deviceId])
+  @@index([customerId])
+}
+
 
 model Address {
   id         String   @id @default(cuid())
@@ -380,20 +382,23 @@ model Order {
   cancelledAt     DateTime?
   cancelReason    String?
   deliveredAt     DateTime?
+  settlementId    String?
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  customer Customer    @relation(fields: [customerId], references: [id])
-  vendor   Vendor      @relation(fields: [vendorId], references: [id])
-  address  Address     @relation(fields: [addressId], references: [id])
-  payment  Payment?    @relation(fields: [paymentId], references: [id])
-  items    OrderItem[]
-  reviews  Review[]
+  customer   Customer          @relation(fields: [customerId], references: [id])
+  vendor     Vendor            @relation(fields: [vendorId], references: [id])
+  address    Address           @relation(fields: [addressId], references: [id])
+  payment    Payment?          @relation(fields: [paymentId], references: [id])
+  settlement VendorSettlement? @relation(fields: [settlementId], references: [id])
+  items      OrderItem[]
+  reviews    Review[]
 
   @@index([customerId])
   @@index([vendorId])
   @@index([status])
   @@index([createdAt])
+  @@index([settlementId])
 }
 
 model OrderItem {
@@ -783,6 +788,7 @@ model VendorSettlement {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
+  orders       Order[]
   transactions VendorWalletTransaction[]
 
   @@index([vendorId])

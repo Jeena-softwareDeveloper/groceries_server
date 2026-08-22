@@ -7,11 +7,16 @@ export async function generateVendorSettlement(vendorId: string, startDate?: Dat
   const periodEnd = endDate || new Date();
   const periodStart = startDate || new Date(periodEnd.getTime() - 7 * 24 * 60 * 60 * 1000); // last 7 days
 
-  // Find all delivered orders for this vendor in the period that haven't been settled yet
+  const existingSettlements = await prisma.vendorSettlement.findMany({
+    where: { vendorId, status: { in: ['PENDING', 'APPROVED'] } },
+    select: { periodStart: true, periodEnd: true },
+  });
+
   const deliveredOrders = await prisma.order.findMany({
     where: {
       vendorId,
       status: 'DELIVERED',
+      settlementId: null,
       deliveredAt: {
         gte: periodStart,
         lte: periodEnd,
@@ -49,6 +54,11 @@ export async function generateVendorSettlement(vendorId: string, startDate?: Dat
       netAmount,
       status: 'PENDING',
     },
+  });
+
+  await prisma.order.updateMany({
+    where: { id: { in: deliveredOrders.map(o => o.id) } },
+    data: { settlementId: settlement.id },
   });
 
   await createAuditLog({

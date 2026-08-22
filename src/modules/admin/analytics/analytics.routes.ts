@@ -5,6 +5,9 @@ import { paramId } from '../../../utils/params.js';
 import { NotFoundError } from '../../../utils/errors.js';
 import type { Request, Response, NextFunction } from 'express';
 
+const isPg = process.env.DATABASE_URL?.startsWith('postgres');
+const modeObj: any = isPg ? { mode: 'insensitive' } : {};
+
 const router = Router();
 
 router.get('/revenue', async (req, res, next) => {
@@ -77,7 +80,7 @@ customersAdminRoutes.get('/', async (req, res, next) => {
     const limit = Number(req.query.limit) || 20;
     const skip = (page - 1) * limit;
     const search = req.query.search as string | undefined;
-    const where = search ? { OR: [{ phone: { contains: search } }, { name: { contains: search, mode: 'insensitive' as const } }, { email: { contains: search, mode: 'insensitive' as const } }] } : {};
+    const where = search ? { OR: [{ phone: { contains: search } }, { name: { contains: search, ...modeObj } }, { email: { contains: search, ...modeObj } }] } : {};
     const [items, total] = await Promise.all([
       prisma.customer.findMany({ where, skip, take: limit, orderBy: { createdAt: 'desc' } }),
       prisma.customer.count({ where }),

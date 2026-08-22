@@ -17,7 +17,7 @@ async function getAppSettings() {
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
 
-async function validateCoupon(code: string, customerId: string, subtotal: number) {
+async function validateCoupon(code: string, customerId: string, subtotal: number, vendorIds?: string[], categoryIds?: string[]) {
   const coupon = await prisma.coupon.findFirst({
     where: { code: code.toUpperCase(), isActive: true },
   });
@@ -31,6 +31,19 @@ async function validateCoupon(code: string, customerId: string, subtotal: number
   if (coupon.usageLimit != null && coupon.usedCount >= coupon.usageLimit) {
     throw new ValidationError('Coupon usage limit reached');
   }
+
+  const scope = (coupon as any).scope as string | null | undefined;
+  if (scope === 'VENDOR' && (coupon as any).vendorId) {
+    if (vendorIds && !vendorIds.includes((coupon as any).vendorId)) {
+      throw new ValidationError('This coupon is not valid for items in your cart');
+    }
+  }
+  if (scope === 'CATEGORY' && (coupon as any).categoryId) {
+    if (categoryIds && !categoryIds.includes((coupon as any).categoryId)) {
+      throw new ValidationError('This coupon is not valid for the categories in your cart');
+    }
+  }
+
   const userUses = await prisma.customerCoupon.count({ where: { customerId, couponId: coupon.id } });
   if (userUses >= coupon.perUserLimit) throw new ValidationError('You have already used this coupon');
 
@@ -121,7 +134,7 @@ export async function getHomeFeed(districtIdInput: string, areaId?: string, lat?
       orderBy: { createdAt: 'desc' },
       take: 12,
     }) : Promise.resolve([]),
-    prisma.offer.findMany({ where: { isActive: true, OR: [{ districtId }, { districtId: null }] }, take: 5 }),
+    prisma.offer.findMany({ where: { isActive: true, OR: [{ districtId }, { districtId: null }], AND: [{ OR: [{ startsAt: null }, { startsAt: { lte: now } }] }, { OR: [{ endsAt: null }, { endsAt: { gte: now } }] }] }, take: 5 }),
     prisma.appSetting.findUnique({ where: { key: 'HOME_PAGE_LAYOUT' } }),
     prisma.deliveryChargeRule.findFirst({ where: { OR: [{ districtId }, { districtId: null }], isActive: true } })
   ]);
@@ -139,9 +152,230 @@ export async function getHomeFeed(districtIdInput: string, areaId?: string, lat?
   return feed;
 }
 
+/** GPS-first home feed — no districtId needed. Finds all vendors within deliveryRadius of user coords.
+ *  Returns { serviced: false } when no vendors cover the user's location. */
+export async function getHomeFeedByLocation(lat: number, lng: number) {
+  const cacheKey = `home:feed:gps:${lat.toFixed(4)}:${lng.toFixed(4)}`;
+  const cached = await cacheGet<unknown>(cacheKey);
+  if (cached) return cached;
+
+  // Find ALL approved, open vendors that have coordinates + deliveryRadius
+  const allVendors = await prisma.vendor.findMany({
+    where: { status: 'APPROVED', isOpen: true },
+    select: {
+      id: true, shopName: true, slug: true, logoUrl: true, bannerUrl: true,
+      rating: true, minOrderValue: true, latitude: true, longitude: true,
+      deliveryRadius: true, areaId: true, districtId: true,
+    },
+  });
+
+  // Filter to vendors whose deliveryRadius covers the user's GPS position
+  const nearbyVendors = allVendors.filter((v) => {
+    if (v.latitude == null || v.longitude == null) return false;
+    return calculateDistance(lat, lng, v.latitude, v.longitude) <= v.deliveryRadius;
+  }).slice(0, 10);
+
+  // If no vendors serve this location → tell the app
+  if (nearbyVendors.length === 0) {
+    const feed = { serviced: false, nearbyShops: [], banners: [], microBanners: [], categories: [], trendingProducts: [], offers: [], bestSellers: [], recentlyAdded: [], flashSale: [], layout: null, deliveryRule: null };
+    await cacheSet(cacheKey, feed, 60);
+    return feed;
+  }
+
+  const vendorIds = nearbyVendors.map((v) => v.id);
+  const now = new Date();
+
+  const [banners, microBanners, categories, trendingProducts, offers, layoutSetting, deliveryRules] = await Promise.all([
+    prisma.banner.findMany({ where: { isActive: true }, orderBy: { sortOrder: 'asc' }, take: 5 }),
+    prisma.microBanner.findMany({ where: { isActive: true }, take: 3 }),
+    prisma.category.findMany({ where: { parentId: null, isActive: true }, orderBy: { sortOrder: 'asc' }, take: 12 }),
+    prisma.product.findMany({
+      where: { status: 'PUBLISHED', isActive: true, vendorId: { in: vendorIds } },
+      select: {
+        id: true, name: true, mrp: true, sellingPrice: true, unit: true, weight: true, categoryId: true,
+        images: { where: { isPrimary: true }, take: 1, select: { url: true } },
+        vendor: { select: { shopName: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 12,
+    }),
+    prisma.offer.findMany({ where: { isActive: true, AND: [{ OR: [{ startsAt: null }, { startsAt: { lte: now } }] }, { OR: [{ endsAt: null }, { endsAt: { gte: now } }] }] }, take: 5 }),
+    prisma.appSetting.findUnique({ where: { key: 'HOME_PAGE_LAYOUT' } }),
+    prisma.deliveryChargeRule.findFirst({ where: { isActive: true } }),
+  ]);
+
+  const feed = {
+    serviced: true,
+    banners, microBanners, categories, nearbyShops: nearbyVendors,
+    trendingProducts, offers,
+    bestSellers: trendingProducts.slice(0, 6),
+    recentlyAdded: trendingProducts,
+    flashSale: offers.filter((o) => o.endsAt && o.endsAt > now),
+    layout: layoutSetting?.value || null,
+    deliveryRule: deliveryRules || null,
+  };
+  await cacheSet(cacheKey, feed, 120);
+  return feed;
+}
+
+/** Reverse geocode lat/lng to real town, area & district names */
+export async function reverseGeocodeLocation(lat: number, lng: number) {
+  const cacheKey = `geo:rev:${lat.toFixed(4)}:${lng.toFixed(4)}`;
+  const cached = await cacheGet<{ displayName: string; locality: string; district: string }>(cacheKey);
+  if (cached) return cached;
+
+  let local = '';
+  let district = '';
+
+  // Strategy 1: BigDataCloud API
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const res = await fetch(
+      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`,
+      { signal: controller.signal }
+    );
+    clearTimeout(timeout);
+    if (res.ok) {
+      const data: any = await res.json();
+      const adminList = Array.isArray(data.localityInfo?.administrative)
+        ? [...data.localityInfo.administrative].sort((a, b) => (b.order || 0) - (a.order || 0))
+        : [];
+
+      for (const a of adminList) {
+        if (a.adminLevel >= 6 && a.name && !a.name.toLowerCase().includes('taluk') && !a.name.toLowerCase().includes('district')) {
+          local = a.name.trim();
+          break;
+        }
+      }
+      if (!local) local = data.locality || data.city || '';
+
+      const distObj = adminList.find(
+        (a: any) => a.adminLevel === 5 || a.name?.toLowerCase().includes('district')
+      );
+      if (distObj) {
+        district = distObj.name.replace(/ district/i, '').replace(/ taluk/i, '').trim();
+      }
+      if (!district) district = (data.principalSubdivision || '').trim();
+    }
+  } catch (e) {
+    console.warn('[Server Geocode] BigDataCloud failed, trying Nominatim...', e);
+  }
+
+  // Strategy 2: OpenStreetMap Nominatim
+  if (!local || !district) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+        {
+          headers: { 'User-Agent': 'DistrictMart-Server/1.0 (contact@districtmart.com)' },
+          signal: controller.signal,
+        }
+      );
+      clearTimeout(timeout);
+      if (res.ok) {
+        const data: any = await res.json();
+        const addr = data.address || {};
+        if (!local) {
+          local = addr.suburb || addr.neighbourhood || addr.village || addr.town || addr.city_district || addr.road || addr.city || '';
+        }
+        if (!district) {
+          district = (addr.state_district || addr.county || addr.city || '').replace(/ district/i, '').replace(/ taluk/i, '').trim();
+        }
+      }
+    } catch (e) {
+      console.warn('[Server Geocode] Nominatim failed...', e);
+    }
+  }
+
+  // Strategy 3: Database nearest district/area coordinate match fallback
+  if (!local || !district) {
+    const districts = await prisma.district.findMany({ where: { isActive: true, latitude: { not: null } } });
+    if (districts.length > 0) {
+      const nearestDist = districts.reduce((best, d) => {
+        const d1 = calculateDistance(lat, lng, d.latitude!, d.longitude!);
+        const d2 = calculateDistance(lat, lng, best.latitude!, best.longitude!);
+        return d1 < d2 ? d : best;
+      });
+      district = nearestDist.name;
+
+      const areas = await prisma.area.findMany({ where: { districtId: nearestDist.id, isActive: true, latitude: { not: null } } });
+      if (areas.length > 0) {
+        const nearestArea = areas.reduce((best, a) => {
+          const d1 = calculateDistance(lat, lng, a.latitude!, a.longitude!);
+          const d2 = calculateDistance(lat, lng, best.latitude!, best.longitude!);
+          return d1 < d2 ? a : best;
+        });
+        local = nearestArea.name;
+      }
+    }
+  }
+
+  const displayName = local && district && local.toLowerCase() !== district.toLowerCase()
+    ? `${local}, ${district}`
+    : (local || district || 'Your Location');
+
+  const result = { displayName, locality: local, district };
+  await cacheSet(cacheKey, result, 86400); // 24hr cache
+  return result;
+}
+
+/** Save or update device location in DeviceLocation and Customer tables */
+export async function saveDeviceLocation(data: {
+  deviceId: string;
+  displayName: string;
+  latitude: number;
+  longitude: number;
+  districtId?: string;
+  areaId?: string;
+  customerId?: string;
+}) {
+  const result = await prisma.deviceLocation.upsert({
+    where: { deviceId: data.deviceId },
+    update: {
+      displayName: data.displayName,
+      latitude: data.latitude,
+      longitude: data.longitude,
+      districtId: data.districtId,
+      areaId: data.areaId,
+      customerId: data.customerId,
+      updatedAt: new Date(),
+    },
+    create: {
+      deviceId: data.deviceId,
+      displayName: data.displayName,
+      latitude: data.latitude,
+      longitude: data.longitude,
+      districtId: data.districtId,
+      areaId: data.areaId,
+      customerId: data.customerId,
+    },
+  });
+
+  if (data.customerId) {
+    await prisma.customer.update({
+      where: { id: data.customerId },
+      data: {
+        currentLatitude: data.latitude,
+        currentLongitude: data.longitude,
+        currentLocation: data.displayName,
+      },
+    }).catch((err) => {
+      console.warn('[saveDeviceLocation] Customer update error:', err);
+    });
+  }
+
+  return result;
+}
+
+
 export async function listPublicDistricts() {
+
   return prisma.district.findMany({ where: { isActive: true }, orderBy: { name: 'asc' } });
 }
+
 
 export async function listPublicAreas(districtId: string) {
   return prisma.area.findMany({ where: { districtId, isActive: true }, orderBy: { name: 'asc' } });
@@ -825,8 +1059,8 @@ export async function updateAddress(
       ...(data.city !== undefined && { city: data.city.trim() }),
       ...(data.state !== undefined && { state: data.state.trim() }),
       ...(data.pincode !== undefined && { pincode: data.pincode.trim() }),
-      ...(data.lat !== undefined && { lat: data.lat }),
-      ...(data.lng !== undefined && { lng: data.lng }),
+      ...(data.lat !== undefined && { latitude: data.lat }),
+      ...(data.lng !== undefined && { longitude: data.lng }),
       ...(data.isDefault !== undefined && { isDefault: data.isDefault }),
     },
   });

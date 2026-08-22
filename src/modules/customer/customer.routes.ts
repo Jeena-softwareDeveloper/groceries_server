@@ -21,6 +21,48 @@ export const customerRoutes = Router();
 
 // Public routes with optional auth to get req.user
 customerRoutes.use(optionalAuthenticate);
+customerRoutes.post('/location', async (req, res, next) => {
+  try {
+    const { deviceId, displayName, latitude, longitude, districtId, areaId } = req.body;
+    if (!deviceId || !displayName || latitude === undefined || longitude === undefined) {
+      res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'deviceId, displayName, latitude and longitude are required' }, data: null });
+      return;
+    }
+    const customerId = (req as any).user?.id || undefined;
+    const result = await svc.saveDeviceLocation({
+      deviceId,
+      displayName,
+      latitude: parseFloat(latitude),
+      longitude: parseFloat(longitude),
+      districtId,
+      areaId,
+      customerId,
+    });
+    sendSuccess(res, result);
+  } catch (e) { next(e); }
+});
+customerRoutes.get('/reverse-geocode', async (req, res, next) => {
+  try {
+    const lat = req.query.lat ? parseFloat(req.query.lat as string) : undefined;
+    const lng = req.query.lng ? parseFloat(req.query.lng as string) : undefined;
+    if (lat === undefined || lng === undefined || isNaN(lat) || isNaN(lng)) {
+      res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'lat and lng are required' }, data: null });
+      return;
+    }
+    sendSuccess(res, await svc.reverseGeocodeLocation(lat, lng));
+  } catch (e) { next(e); }
+});
+customerRoutes.get('/home/feed/bylocation', async (req, res, next) => {
+  try {
+    const lat = req.query.lat ? parseFloat(req.query.lat as string) : undefined;
+    const lng = req.query.lng ? parseFloat(req.query.lng as string) : undefined;
+    if (!lat || !lng) {
+      res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'lat and lng are required' }, data: null });
+      return;
+    }
+    sendSuccess(res, await svc.getHomeFeedByLocation(lat, lng));
+  } catch (e) { next(e); }
+});
 customerRoutes.get('/home/feed', async (req, res, next) => {
   try {
     const lat = req.query.lat ? parseFloat(req.query.lat as string) : undefined;

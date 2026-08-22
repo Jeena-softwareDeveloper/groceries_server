@@ -2,6 +2,9 @@ import { prisma } from '../../lib/prisma.js';
 import { cacheDel, cacheDelPattern } from '../../lib/redis.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../../utils/errors.js';
 
+const isPg = process.env.DATABASE_URL?.startsWith('postgres');
+const modeObj: any = isPg ? { mode: 'insensitive' } : {};
+
 // ─── Profile ─────────────────────────────────────────────────────────────────
 
 import type { ProductInput, OfferInput, VendorProfileUpdate } from './vendor.schemas.js';
@@ -160,7 +163,7 @@ export async function listVendorProducts(vendorId: string, page = 1, limit = 20,
   const where = {
     vendorId,
     ...(status ? { status } : {}),
-    ...(search ? { name: { contains: search, mode: 'insensitive' as const } } : {}),
+    ...(search ? { name: { contains: search, ...modeObj } } : {}),
   };
   const [items, total] = await Promise.all([
     prisma.product.findMany({
@@ -297,6 +300,14 @@ export async function submitProductForApproval(vendorId: string, productId: stri
 export async function publishProduct(vendorId: string, productId: string, status: string) {
   const product = await prisma.product.findFirst({ where: { id: productId, vendorId } });
   if (!product) throw new NotFoundError('Product not found');
+
+  if (status === 'PUBLISHED') {
+    const approval = await prisma.productApproval.findFirst({
+      where: { productId, status: 'APPROVED' },
+    });
+    if (!approval) throw new ValidationError('Product must be approved by admin before publishing');
+  }
+
   const updated = await prisma.product.update({ where: { id: productId }, data: { status } });
   await invalidateVendorCache(vendorId);
   return updated;
@@ -387,7 +398,7 @@ export async function listVendorOrders(vendorId: string, status?: string, page =
   if (search) {
     where.OR = [
       { orderNumber: { contains: search } },
-      { customer: { name: { contains: search, mode: 'insensitive' as const } } },
+      { customer: { name: { contains: search, ...modeObj } } },
     ];
   }
   const [items, total] = await Promise.all([
@@ -424,12 +435,32 @@ export async function updateOrderStatus(vendorId: string, orderId: string, statu
     throw new ValidationError(`Cannot transition from ${order.status} to ${status}`);
   }
 
+  if (status === 'CANCELLED' || status === 'RETURNED') {
+    return prisma.$transaction(async (tx) => {
+      const fullOrder = await tx.order.findUnique({ where: { id: orderId }, include: { items: true } });
+      if (fullOrder) {
+        for (const item of fullOrder.items) {
+          await tx.inventory.updateMany({
+            where: { productId: item.productId },
+            data: { stock: { increment: item.quantity } },
+          });
+        }
+      }
+      return tx.order.update({
+        where: { id: orderId },
+        data: {
+          status: status as any,
+          ...(status === 'CANCELLED' ? { cancelledAt: new Date() } : {}),
+        },
+      });
+    });
+  }
+
   return prisma.order.update({
     where: { id: orderId },
     data: {
       status: status as 'PLACED' | 'CONFIRMED' | 'PACKED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED' | 'RETURNED',
       ...(status === 'DELIVERED' ? { deliveredAt: new Date() } : {}),
-      ...(status === 'CANCELLED' ? { cancelledAt: new Date() } : {}),
     },
   });
 }

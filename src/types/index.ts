@@ -39,6 +39,8 @@ export interface District {
   name: string;
   code: string;
   isActive: boolean;
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 export interface Area {
@@ -46,6 +48,8 @@ export interface Area {
   districtId: string;
   name: string;
   isActive: boolean;
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 /** Pagination query params */

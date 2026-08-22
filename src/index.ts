@@ -22,9 +22,9 @@ async function bootstrap() {
 
   const app = createApp();
 
-  app.listen(env.PORT, () => {
-    logger.info(`DistrictMart API → http://localhost:${env.PORT}`);
-    logger.info(`Swagger docs → http://localhost:${env.PORT}/api/docs`);
+  app.listen(Number(env.PORT), '192.23.1.53', () => {
+    logger.info(`DistrictMart API → http://192.23.1.53:${env.PORT}`);
+    logger.info(`Swagger docs → http://192.23.1.53:${env.PORT}/api/docs`);
   });
 
   const shutdown = async () => {

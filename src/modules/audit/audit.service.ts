@@ -1,5 +1,8 @@
 import { prisma } from '../../lib/prisma.js';
 
+const isPg = process.env.DATABASE_URL?.startsWith('postgres');
+const modeObj: any = isPg ? { mode: 'insensitive' } : {};
+
 export interface CreateAuditLogParams {
   actorType: 'SUPER_ADMIN' | 'VENDOR' | 'CUSTOMER' | 'SYSTEM';
   actorId?: string;
@@ -43,8 +46,8 @@ export async function listAuditLogs(
   if (action) where.action = action;
   if (search) {
     where.OR = [
-      { action: { contains: search, mode: 'insensitive' } },
-      { actorName: { contains: search, mode: 'insensitive' } },
+      { action: { contains: search, ...modeObj } },
+      { actorName: { contains: search, ...modeObj } },
       { entityId: { contains: search } },
     ];
   }

@@ -28,9 +28,9 @@ export async function comparePassword(password: string, hash: string): Promise<b
 
 const INDIAN_MOBILE = /^[6-9]\d{9}$/;
 
-/** Temporary production test login — change/remove later when real SMS OTP is live for all users */
 const TEST_PHONE = '9999999999';
 const TEST_OTP = '123456';
+const isDev = env.NODE_ENV === 'development';
 
 function normalizePhone(phone: string): string {
   return phone.replace(/\D/g, '').slice(-10);
@@ -45,14 +45,11 @@ function assertValidPhone(phone: string): string {
 }
 
 function isTestPhone(phone: string): boolean {
-  return phone === TEST_PHONE;
+  return isDev && phone === TEST_PHONE;
 }
 
 function generateOtp(phone: string): string {
-  // Test number works in production too (OTP always 123456). Other numbers get random OTP.
-  if (isTestPhone(phone) || env.NODE_ENV === 'development') {
-    return TEST_OTP;
-  }
+  if (isDev) return TEST_OTP;
   return String(randomInt(100000, 999999));
 }
 
@@ -85,10 +82,9 @@ export async function requestCustomerOtp(
 
   await prisma.otpSession.deleteMany({ where: { phone: normalized } });
 
-  // Send SMS for all numbers except the hardcoded test phone
   const shouldSendSms =
-    !!(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_VERIFY_SERVICE_SID) &&
-    !isTestPhone(normalized);
+    !isDev &&
+    !!(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_VERIFY_SERVICE_SID);
 
   if (shouldSendSms) {
     try {
@@ -104,7 +100,7 @@ export async function requestCustomerOtp(
     
     return { message: 'OTP sent successfully' };
   } else {
-    if (env.NODE_ENV !== 'development' && !isTestPhone(normalized)) {
+    if (!isDev) {
       console.warn('Twilio Verify credentials missing — OTP generated but not sent for', normalized);
     }
     
@@ -119,8 +115,7 @@ export async function requestCustomerOtp(
 
     return {
       message: 'OTP sent successfully',
-      // Expose OTP only in development, or for the temporary test phone
-      ...((env.NODE_ENV === 'development' || isTestPhone(normalized)) ? { otp } : {}),
+      ...(isDev ? { otp } : {}),
     };
   }
 }
@@ -132,11 +127,11 @@ export async function verifyCustomerOtp(phone: string, otp: string, deviceName?:
     throw new ValidationError('Invalid OTP');
   }
 
-  const shouldSendSms =
-    !!(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_VERIFY_SERVICE_SID) &&
-    !isTestPhone(normalized);
+  const shouldVerifySms =
+    !isDev &&
+    !!(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_VERIFY_SERVICE_SID);
 
-  if (shouldSendSms) {
+  if (shouldVerifySms) {
     try {
       const client = twilio(env.TWILIO_ACCOUNT_SID!, env.TWILIO_AUTH_TOKEN!);
       const verification = await client.verify.v2.services(env.TWILIO_VERIFY_SERVICE_SID!).verificationChecks.create({
