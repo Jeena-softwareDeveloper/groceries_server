@@ -1,5 +1,5 @@
 import { prisma } from '../../../lib/prisma.js';
-import { NotFoundError } from '../../../utils/errors.js';
+import { NotFoundError, ConflictError } from '../../../utils/errors.js';
 
 export async function listVendors(status?: string, page = 1, limit = 20) {
   const skip = (page - 1) * limit;
@@ -97,5 +97,12 @@ export async function suspendVendor(id: string) {
 
 export async function removeVendor(id: string) {
   await getVendor(id);
-  return prisma.vendor.delete({ where: { id } });
+  try {
+    return await prisma.vendor.delete({ where: { id } });
+  } catch (error: any) {
+    if (error.code === 'P2003') {
+      throw new ConflictError('Cannot delete this vendor because they have associated records (e.g., orders, products). Please suspend them instead.');
+    }
+    throw error;
+  }
 }

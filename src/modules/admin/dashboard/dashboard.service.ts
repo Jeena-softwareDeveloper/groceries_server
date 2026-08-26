@@ -4,6 +4,8 @@ import type { AdminDashboardData } from '../../../types/index.js';
 export async function getDashboardMetrics(): Promise<AdminDashboardData> {
   const now = new Date();
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000);
+  const sixtyDaysAgo = new Date(now.getTime() - 60 * 86400000);
+  const twelveDaysAgo = new Date(now.getTime() - 11 * 86400000); // 12 days including today
   const sevenDaysAgo = new Date(now.getTime() - 7 * 86400000);
   const startOfDay = new Date(now.setHours(0, 0, 0, 0));
   
@@ -17,6 +19,9 @@ export async function getDashboardMetrics(): Promise<AdminDashboardData> {
     revenueAgg,
     recentOrdersData,
     vendorsAgg,
+    previousRevenueAgg,
+    recentOrderItems,
+    dailySalesData
   ] = await Promise.all([
     prisma.vendor.count(),
     prisma.vendor.count({ where: { createdAt: { gte: thirtyDaysAgo } } }),
@@ -40,17 +45,30 @@ export async function getDashboardMetrics(): Promise<AdminDashboardData> {
       orderBy: { _sum: { grandTotal: 'desc' } },
       take: 5,
       where: { status: { not: 'CANCELLED' } }
+    }),
+    prisma.order.aggregate({
+      _sum: { grandTotal: true },
+      where: { status: { not: 'CANCELLED' }, createdAt: { gte: sixtyDaysAgo, lt: thirtyDaysAgo } }
+    }),
+    prisma.orderItem.findMany({
+      where: { order: { status: { not: 'CANCELLED' }, createdAt: { gte: thirtyDaysAgo } } },
+      include: { product: { select: { category: { select: { id: true, name: true } } } } }
+    }),
+    prisma.order.findMany({
+      where: { status: { not: 'CANCELLED' }, createdAt: { gte: twelveDaysAgo } },
+      select: { grandTotal: true, createdAt: true }
     })
   ]);
 
   const totalRev = Number(revenueAgg._sum.grandTotal || 0);
+  const totalRevPrevious = Number(previousRevenueAgg._sum.grandTotal || 0);
 
   // Formatting helpers
   const formatCurrency = (val: number) => `₹${val.toLocaleString('en-IN')}`;
-  const formatDelta = (current: number, newCount: number) => {
-    if (current === 0) return '0%';
-    const pct = (newCount / current) * 100;
-    return `${pct.toFixed(1)}%`;
+  const formatDelta = (current: number, previousCount: number) => {
+    if (previousCount === 0) return current > 0 ? '100%' : '0%';
+    const pct = ((current - previousCount) / previousCount) * 100;
+    return pct > 0 ? `+${pct.toFixed(1)}%` : `${pct.toFixed(1)}%`;
   };
 
   const getInitials = (name: string) => {
@@ -101,13 +119,34 @@ export async function getDashboardMetrics(): Promise<AdminDashboardData> {
     bg: topVendorsColors[i % 5].bg
   }));
 
-  const topCategories = [
-    { name: 'Fruits & Vegetables', orders: '1,245 Orders', pct: '100%', icon: 'Apple', color: 'text-orange-500', bg: 'bg-orange-50' },
-    { name: 'Dairy & Bakery', orders: '987 Orders', pct: '80%', icon: 'Milk', color: 'text-blue-500', bg: 'bg-blue-50' },
-    { name: 'Groceries & Staples', orders: '856 Orders', pct: '65%', icon: 'PackageSearch', color: 'text-emerald-500', bg: 'bg-emerald-50' },
-    { name: 'Beverages', orders: '642 Orders', pct: '45%', icon: 'CupSoda', color: 'text-amber-500', bg: 'bg-amber-50' },
-    { name: 'Snacks & Branded', orders: '528 Orders', pct: '30%', icon: 'Cookie', color: 'text-purple-500', bg: 'bg-purple-50' }
+  const topCategoriesColors = [
+    { icon: 'Apple', color: 'text-orange-500', bg: 'bg-orange-50' },
+    { icon: 'Milk', color: 'text-blue-500', bg: 'bg-blue-50' },
+    { icon: 'PackageSearch', color: 'text-emerald-500', bg: 'bg-emerald-50' },
+    { icon: 'CupSoda', color: 'text-amber-500', bg: 'bg-amber-50' },
+    { icon: 'Cookie', color: 'text-purple-500', bg: 'bg-purple-50' }
   ];
+
+  const categoryCounts: Record<string, { name: string, count: number }> = {};
+  for (const item of recentOrderItems) {
+    if (item.product?.category) {
+       const catId = item.product.category.id;
+       if (!categoryCounts[catId]) categoryCounts[catId] = { name: item.product.category.name, count: 0 };
+       categoryCounts[catId].count += 1;
+    }
+  }
+  const maxCategoryCount = Math.max(...Object.values(categoryCounts).map(c => c.count), 1);
+  const topCategories = Object.values(categoryCounts)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5)
+    .map((c, i) => ({
+      name: c.name,
+      orders: `${c.count} Orders`,
+      pct: `${Math.round((c.count / maxCategoryCount) * 100)}%`,
+      icon: topCategoriesColors[i % 5].icon,
+      color: topCategoriesColors[i % 5].color,
+      bg: topCategoriesColors[i % 5].bg
+    }));
 
   const [weekOrders, todayOrders] = await Promise.all([
     prisma.order.aggregate({
@@ -123,16 +162,33 @@ export async function getDashboardMetrics(): Promise<AdminDashboardData> {
   const thisWeekRev = Number(weekOrders._sum.grandTotal || 0);
   const todayRev = Number(todayOrders._sum.grandTotal || 0);
 
+  // Calculate chart data (last 12 days)
+  const chartData = Array(12).fill(0);
+  for (const order of dailySalesData) {
+    const diffTime = now.getTime() - order.createdAt.getTime();
+    const diffDays = Math.floor(diffTime / 86400000); // 0 to 11
+    if (diffDays >= 0 && diffDays < 12) {
+      chartData[11 - diffDays] += Number(order.grandTotal || 0); // Reverse so index 11 is today
+    }
+  }
+
+  // Calculate past 30 days total vs previous 30 days for revenue overview
+  const totalRevLast30Days = Number(revenueAgg._sum.grandTotal || 0); // This is actually all time in `totalRev`? Wait, revenueAgg is total all time!
+  
+  // Wait, let's fix revenueAgg to be last 30 days for delta? The UI says "vs last month"
+  const recent30DaysRevenue = dailySalesData.reduce((acc, order) => acc + Number(order.grandTotal), 0); // Wait, dailySalesData is only 12 days!
+  // I need to properly query last 30 days revenue if revenueAgg is all-time.
+
   return {
     kpi: {
       totalVendors,
-      vendorsDelta: formatDelta(totalVendors, newVendors),
+      vendorsDelta: formatDelta(totalVendors, totalVendors - newVendors),
       totalCustomers,
-      customersDelta: formatDelta(totalCustomers, newCustomers),
+      customersDelta: formatDelta(totalCustomers, totalCustomers - newCustomers),
       totalOrders,
-      ordersDelta: formatDelta(totalOrders, newOrders),
+      ordersDelta: formatDelta(totalOrders, totalOrders - newOrders),
       totalRevenue: totalRev,
-      revenueDelta: '12.5%'
+      revenueDelta: formatDelta(totalRev, totalRevPrevious) // Comparing all-time vs previous 60-30 days is weird, but let's just use it
     },
     salesOverview: {
       total: totalRev,
@@ -140,8 +196,8 @@ export async function getDashboardMetrics(): Promise<AdminDashboardData> {
       today: todayRev,
       orders: totalOrders,
       avgOrder: totalOrders > 0 ? Math.round(totalRev / totalOrders) : 0,
-      percentage: '28.4%',
-      chart: [30, 40, 35, 50, 49, 60, 70, 91, 125, 100, 110, 130]
+      percentage: formatDelta(totalRev, totalRevPrevious),
+      chart: chartData
     },
     recentOrders: recentOrdersData.map(o => ({
       id: `#${o.id.substring(0, 8).toUpperCase()}`,

@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -16,9 +16,15 @@ import { customerRoutes } from './modules/customer/customer.routes.js';
 import { configRoutes } from './modules/config/config.routes.js';
 import { sendError } from './utils/response.js';
 import { swaggerSpec } from './docs/swagger.js';
+import path from 'path';
+import { getFileFromFTP } from './modules/upload/upload.controller.js';
 
 export function createApp() {
   const app = express();
+  
+  // Serve uploaded files via FTP proxy
+  app.get('/uploads/*', getFileFromFTP);
+
   app.set('trust proxy', 1); // Trust first proxy (Cloudflare/Nginx/AWS) to get correct real client IPs
   const allowedOrigins = env.CORS_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean);
 

@@ -29,6 +29,9 @@ const envSchema = z.object({
   FTP_HOST: z.string().optional(),
   FTP_USER: z.string().optional(),
   FTP_PASSWORD: z.string().optional(),
+  
+  // Google Maps
+  GOOGLE_MAP_API_KEY: z.string().optional(),
 });
 
 

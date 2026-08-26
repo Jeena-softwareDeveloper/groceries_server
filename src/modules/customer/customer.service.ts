@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma.js';
 import { cacheGet, cacheSet, cacheDel, cacheDelPattern } from '../../lib/redis.js';
 import { NotFoundError, ValidationError, ForbiddenError } from '../../utils/errors.js';
+import { env } from '../../config/env.js';
 import { randomBytes } from 'crypto';
 
 const memCartCoupons = new Map<string, string>();
@@ -120,31 +121,16 @@ export async function getHomeFeed(districtIdInput: string, areaId?: string, lat?
   const vendorIds = vendors.map(v => v.id);
 
   const now = new Date();
-  const [banners, microBanners, categories, trendingProducts, offers, layoutSetting, deliveryRules] = await Promise.all([
+  const [banners, categories, layoutSetting, deliveryRules] = await Promise.all([
     prisma.banner.findMany({ where: { OR: [{ districtId }, { districtId: null }], isActive: true }, orderBy: { sortOrder: 'asc' }, take: 5 }),
-    prisma.microBanner.findMany({ where: { OR: [{ districtId }, { districtId: null }], isActive: true }, take: 3 }),
     prisma.category.findMany({ where: { parentId: null, isActive: true }, orderBy: { sortOrder: 'asc' }, take: 12 }),
-    vendorIds.length > 0 ? prisma.product.findMany({
-      where: { status: 'PUBLISHED', isActive: true, vendorId: { in: vendorIds } },
-      select: {
-        id: true, name: true, mrp: true, sellingPrice: true, unit: true, weight: true, categoryId: true,
-        images: { where: { isPrimary: true }, take: 1, select: { url: true } },
-        vendor: { select: { shopName: true } }
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 12,
-    }) : Promise.resolve([]),
-    prisma.offer.findMany({ where: { isActive: true, OR: [{ districtId }, { districtId: null }], AND: [{ OR: [{ startsAt: null }, { startsAt: { lte: now } }] }, { OR: [{ endsAt: null }, { endsAt: { gte: now } }] }] }, take: 5 }),
     prisma.appSetting.findUnique({ where: { key: 'HOME_PAGE_LAYOUT' } }),
     prisma.deliveryChargeRule.findFirst({ where: { OR: [{ districtId }, { districtId: null }], isActive: true } })
   ]);
 
   const feed = {
-    banners, microBanners, categories, nearbyShops: vendors,
-    trendingProducts, offers,
-    bestSellers: trendingProducts.slice(0, 6),
-    recentlyAdded: trendingProducts,
-    flashSale: offers.filter((o) => o.endsAt && o.endsAt > now),
+    banners,
+    categories,
     layout: layoutSetting?.value || null,
     deliveryRule: deliveryRules || null,
   };
@@ -177,7 +163,7 @@ export async function getHomeFeedByLocation(lat: number, lng: number) {
 
   // If no vendors serve this location → tell the app
   if (nearbyVendors.length === 0) {
-    const feed = { serviced: false, nearbyShops: [], banners: [], microBanners: [], categories: [], trendingProducts: [], offers: [], bestSellers: [], recentlyAdded: [], flashSale: [], layout: null, deliveryRule: null };
+    const feed = { serviced: false, banners: [], categories: [], layout: null, deliveryRule: null };
     await cacheSet(cacheKey, feed, 60);
     return feed;
   }
@@ -185,32 +171,17 @@ export async function getHomeFeedByLocation(lat: number, lng: number) {
   const vendorIds = nearbyVendors.map((v) => v.id);
   const now = new Date();
 
-  const [banners, microBanners, categories, trendingProducts, offers, layoutSetting, deliveryRules] = await Promise.all([
+  const [banners, categories, layoutSetting, deliveryRules] = await Promise.all([
     prisma.banner.findMany({ where: { isActive: true }, orderBy: { sortOrder: 'asc' }, take: 5 }),
-    prisma.microBanner.findMany({ where: { isActive: true }, take: 3 }),
     prisma.category.findMany({ where: { parentId: null, isActive: true }, orderBy: { sortOrder: 'asc' }, take: 12 }),
-    prisma.product.findMany({
-      where: { status: 'PUBLISHED', isActive: true, vendorId: { in: vendorIds } },
-      select: {
-        id: true, name: true, mrp: true, sellingPrice: true, unit: true, weight: true, categoryId: true,
-        images: { where: { isPrimary: true }, take: 1, select: { url: true } },
-        vendor: { select: { shopName: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 12,
-    }),
-    prisma.offer.findMany({ where: { isActive: true, AND: [{ OR: [{ startsAt: null }, { startsAt: { lte: now } }] }, { OR: [{ endsAt: null }, { endsAt: { gte: now } }] }] }, take: 5 }),
     prisma.appSetting.findUnique({ where: { key: 'HOME_PAGE_LAYOUT' } }),
     prisma.deliveryChargeRule.findFirst({ where: { isActive: true } }),
   ]);
 
   const feed = {
     serviced: true,
-    banners, microBanners, categories, nearbyShops: nearbyVendors,
-    trendingProducts, offers,
-    bestSellers: trendingProducts.slice(0, 6),
-    recentlyAdded: trendingProducts,
-    flashSale: offers.filter((o) => o.endsAt && o.endsAt > now),
+    banners, 
+    categories,
     layout: layoutSetting?.value || null,
     deliveryRule: deliveryRules || null,
   };
@@ -227,42 +198,44 @@ export async function reverseGeocodeLocation(lat: number, lng: number) {
   let local = '';
   let district = '';
 
-  // Strategy 1: BigDataCloud API
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
-    const res = await fetch(
-      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`,
-      { signal: controller.signal }
-    );
-    clearTimeout(timeout);
-    if (res.ok) {
-      const data: any = await res.json();
-      const adminList = Array.isArray(data.localityInfo?.administrative)
-        ? [...data.localityInfo.administrative].sort((a, b) => (b.order || 0) - (a.order || 0))
-        : [];
-
-      for (const a of adminList) {
-        if (a.adminLevel >= 6 && a.name && !a.name.toLowerCase().includes('taluk') && !a.name.toLowerCase().includes('district')) {
-          local = a.name.trim();
-          break;
+  // Strategy 1: Google Maps API (Highest Accuracy if Key available)
+  if (env.GOOGLE_MAP_API_KEY) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${env.GOOGLE_MAP_API_KEY}`, { signal: controller.signal });
+      clearTimeout(timeout);
+      
+      if (res.ok) {
+        const data: any = await res.json();
+        if (data.status === 'OK' && data.results && data.results.length > 0) {
+           const result = data.results.find((r: any) => !r.types.includes('plus_code')) || data.results[0];
+           
+           let gLocal = '';
+           let gDistrict = '';
+           
+           for (const comp of result.address_components) {
+             if (comp.types.includes('locality')) gLocal = comp.short_name;
+             if (comp.types.includes('route') || comp.types.includes('sublocality_level_1')) {
+                gLocal = comp.short_name + (gLocal ? ', ' + gLocal : '');
+             }
+             if (comp.types.includes('administrative_area_level_3')) gDistrict = comp.short_name;
+           }
+           
+           if (!gLocal && result.formatted_address) {
+             gLocal = result.formatted_address.split(',')[0];
+           }
+           
+           local = gLocal || '';
+           district = gDistrict || '';
         }
       }
-      if (!local) local = data.locality || data.city || '';
-
-      const distObj = adminList.find(
-        (a: any) => a.adminLevel === 5 || a.name?.toLowerCase().includes('district')
-      );
-      if (distObj) {
-        district = distObj.name.replace(/ district/i, '').replace(/ taluk/i, '').trim();
-      }
-      if (!district) district = (data.principalSubdivision || '').trim();
+    } catch (e) {
+       console.warn('[Server Geocode] Google Maps failed, falling back...', e);
     }
-  } catch (e) {
-    console.warn('[Server Geocode] BigDataCloud failed, trying Nominatim...', e);
   }
 
-  // Strategy 2: OpenStreetMap Nominatim
+  // Strategy 2: OpenStreetMap Nominatim (High Accuracy Fallback)
   if (!local || !district) {
     try {
       const controller = new AbortController();
@@ -278,15 +251,59 @@ export async function reverseGeocodeLocation(lat: number, lng: number) {
       if (res.ok) {
         const data: any = await res.json();
         const addr = data.address || {};
-        if (!local) {
-          local = addr.suburb || addr.neighbourhood || addr.village || addr.town || addr.city_district || addr.road || addr.city || '';
+        const suburb = addr.suburb || addr.neighbourhood || addr.village || addr.city_district || addr.road || '';
+        const town = addr.town || addr.city || '';
+        
+        if (suburb && town && suburb !== town) {
+          local = `${suburb}, ${town}`;
+        } else {
+          local = suburb || town || '';
         }
+        district = (addr.state_district || addr.county || addr.city || '').replace(/ district/i, '').replace(/ taluk/i, '').trim();
+      }
+    } catch (e) {
+      console.warn('[Server Geocode] Nominatim failed, falling back to BigDataCloud...', e);
+    }
+  }
+
+  // Strategy 2: BigDataCloud API (Town/City level Fallback)
+  if (!local || !district) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4000);
+      const res = await fetch(
+        `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=en`,
+        { signal: controller.signal }
+      );
+      clearTimeout(timeout);
+      if (res.ok) {
+        const data: any = await res.json();
+        const adminList = Array.isArray(data.localityInfo?.administrative)
+          ? [...data.localityInfo.administrative].sort((a, b) => (b.order || 0) - (a.order || 0))
+          : [];
+
+        if (!local) {
+          for (const a of adminList) {
+            if (a.adminLevel >= 6 && a.name && !a.name.toLowerCase().includes('taluk') && !a.name.toLowerCase().includes('district')) {
+              local = a.name.trim();
+              break;
+            }
+          }
+          if (!local) local = data.locality || data.city || '';
+        }
+
         if (!district) {
-          district = (addr.state_district || addr.county || addr.city || '').replace(/ district/i, '').replace(/ taluk/i, '').trim();
+          const distObj = adminList.find(
+            (a: any) => a.adminLevel === 5 || a.name?.toLowerCase().includes('district')
+          );
+          if (distObj) {
+            district = distObj.name.replace(/ district/i, '').replace(/ taluk/i, '').trim();
+          }
+          if (!district) district = (data.principalSubdivision || '').trim();
         }
       }
     } catch (e) {
-      console.warn('[Server Geocode] Nominatim failed...', e);
+      console.warn('[Server Geocode] BigDataCloud failed...', e);
     }
   }
 
@@ -407,7 +424,8 @@ export async function listShops(districtIdInput: string, areaId?: string, catego
     },
     select: {
       id: true, shopName: true, logoUrl: true, bannerUrl: true, rating: true, minOrderValue: true, address: true,
-      areaId: true, area: { select: { name: true } }, latitude: true, longitude: true, deliveryRadius: true
+      areaId: true, area: { select: { name: true } }, latitude: true, longitude: true, deliveryRadius: true,
+      _count: { select: { products: { where: { status: 'PUBLISHED', isActive: true } } } }
     },
     orderBy: { rating: 'desc' },
   });
@@ -432,15 +450,18 @@ export async function getShop(vendorId: string) {
     select: {
       id: true,
       shopName: true,
+      phone: true,
       logoUrl: true,
       bannerUrl: true,
       rating: true,
+      ratingCount: true,
       minOrderValue: true,
       address: true,
       fssaiNumber: true,
       isOpen: true,
       districtId: true,
       area: { select: { name: true, district: { select: { name: true } } } },
+      reviews: { select: { id: true, rating: true, comment: true, createdAt: true, customer: { select: { name: true } } } },
     },
   });
   if (!vendor) throw new NotFoundError('Shop not found');

@@ -7,7 +7,7 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
   deliveryFee: 0,
   supportEmail: 'support@districtmart.com',
   supportPhone: '+910000000000',
-  featureFlags: { wallet: false, cod: true },
+  featureFlags: { wallet: false, cod: true, vendorApprovalRequired: true },
 };
 
 export async function getSettings() {

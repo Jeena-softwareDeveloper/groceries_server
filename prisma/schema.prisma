@@ -74,6 +74,7 @@ model Vendor {
   logoUrl         String?
   bannerUrl       String?
   address         String
+  landmark        String?
   latitude        Float?
   longitude       Float?
   phone           String
@@ -113,6 +114,7 @@ model Vendor {
   @@index([areaId])
   @@index([districtId])
   @@index([status])
+  @@index([districtId, status, isOpen])
 }
 
 model VendorStaff {
@@ -197,6 +199,7 @@ model Product {
   @@index([categoryId])
   @@index([status])
   @@index([sku])
+  @@index([vendorId, status, isActive])
 }
 
 model ProductApproval {
@@ -419,19 +422,22 @@ model OrderItem {
 // ─── Marketing ─────────────────────────────────────────────────────────────────
 
 model Banner {
-  id         String    @id @default(cuid())
-  districtId String?
-  title      String
-  imageUrl   String
-  linkUrl    String?
+  id            String    @id @default(cuid())
+  districtId    String?
+  title         String
+  imageUrl      String
+  videoUrl      String?
+  type          String    @default("IMAGE") // "IMAGE" | "VIDEO"
+  row           Int       @default(1)       // 1=video row, 2=two images row, 3=wide image row
+  linkUrl       String?
   themeColor    String?
-  themeColorEnd String?   // gradient end color (optional - if set, header shows gradient)
+  themeColorEnd String?
   sortOrder     Int       @default(0)
-  isActive   Boolean   @default(true)
-  startsAt   DateTime?
-  endsAt     DateTime?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  isActive      Boolean   @default(true)
+  startsAt      DateTime?
+  endsAt        DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   district District? @relation(fields: [districtId], references: [id])
 
@@ -681,6 +687,7 @@ model VendorRequest {
   districtId        String?
   areaId            String?
   address           String?
+  landmark          String?
   latitude          Float?
   longitude         Float?
   deliveryRadius    Float?    @default(5)

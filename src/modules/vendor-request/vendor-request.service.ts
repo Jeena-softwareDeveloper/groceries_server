@@ -72,7 +72,7 @@ export async function submitApplication(customerId: string) {
     }
   }
 
-  return prisma.vendorRequest.update({
+  const updatedReq = await prisma.vendorRequest.update({
     where: { id: request.id },
     data: {
       status: 'PENDING',
@@ -83,6 +83,17 @@ export async function submitApplication(customerId: string) {
       accountNumber,
     },
   });
+
+  // Auto-approve if the feature flag requires NO manual approval
+  const { getSettings } = await import('../admin/settings/settings.service.js');
+  const settings = await getSettings();
+  const featureFlags = settings.featureFlags as Record<string, boolean>;
+  if (featureFlags && featureFlags.vendorApprovalRequired === false) {
+    // We must call approveRequest. We also need an adminId, but since it's system auto-approve, we use 'SYSTEM'
+    await approveRequest(request.id, 'SYSTEM_AUTO_APPROVE').catch(e => console.error('Auto approve failed', e));
+  }
+
+  return updatedReq;
 }
 
 // ─── Admin-facing service ──────────────────────────────────────────────────────
@@ -166,6 +177,9 @@ export async function approveRequest(id: string, adminId: string) {
       logoUrl: req.logoUrl,
       bannerUrl: req.bannerUrl,
       address: req.address ?? '',
+      landmark: req.landmark,
+      latitude: req.latitude,
+      longitude: req.longitude,
       phone: req.mobileNumber ?? '',
       fssaiNumber: req.fssaiNumber,
       gstNumber: req.gstNumber,
