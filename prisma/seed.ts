@@ -15,13 +15,15 @@ async function main() {
 
   const district = await prisma.district.upsert({
     where: { code: 'CHN' },
-    update: {},
-    create: { name: 'Chennai', code: 'CHN', isActive: true },
+    update: { latitude: 13.0827, longitude: 80.2707 },
+    create: { name: 'Chennai', code: 'CHN', isActive: true, latitude: 13.0827, longitude: 80.2707 },
   });
 
   let area = await prisma.area.findFirst({ where: { districtId: district.id, name: 'T. Nagar' } });
   if (!area) {
-    area = await prisma.area.create({ data: { districtId: district.id, name: 'T. Nagar', pincode: '600017', isActive: true } });
+    area = await prisma.area.create({ data: { districtId: district.id, name: 'T. Nagar', pincode: '600017', isActive: true, latitude: 13.0418, longitude: 80.2337 } });
+  } else if (area.latitude == null || area.longitude == null) {
+    area = await prisma.area.update({ where: { id: area.id }, data: { latitude: 13.0418, longitude: 80.2337 } });
   }
 
   const groceries = await prisma.category.upsert({
@@ -45,7 +47,7 @@ async function main() {
   const vendorPassword = await bcrypt.hash('Vendor@123', 12);
   const vendor = await prisma.vendor.upsert({
     where: { email: 'vendor@districtmart.com' },
-    update: {},
+    update: { latitude: 13.0418, longitude: 80.2337, deliveryRadius: 5 },
     create: {
       email: 'vendor@districtmart.com',
       passwordHash: vendorPassword,
@@ -55,6 +57,9 @@ async function main() {
       phone: '9876543210',
       areaId: area.id,
       districtId: district.id,
+      latitude: 13.0418,
+      longitude: 80.2337,
+      deliveryRadius: 5,
       status: 'APPROVED',
       approvedAt: new Date(),
       approvedBy: admin.id,

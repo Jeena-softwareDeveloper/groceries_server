@@ -28,7 +28,7 @@ customerRoutes.post('/location', async (req, res, next) => {
       res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'deviceId, displayName, latitude and longitude are required' }, data: null });
       return;
     }
-    const customerId = (req as any).user?.id || undefined;
+    const customerId = req.user?.role === 'CUSTOMER' ? req.user.sub : undefined;
     const result = await svc.saveDeviceLocation({
       deviceId,
       displayName,
@@ -56,11 +56,11 @@ customerRoutes.get('/home/feed/bylocation', async (req, res, next) => {
   try {
     const lat = req.query.lat ? parseFloat(req.query.lat as string) : undefined;
     const lng = req.query.lng ? parseFloat(req.query.lng as string) : undefined;
-    if (!lat || !lng) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
       res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'lat and lng are required' }, data: null });
       return;
     }
-    sendSuccess(res, await svc.getHomeFeedByLocation(lat, lng));
+    sendSuccess(res, await svc.getHomeFeedByLocation(lat as number, lng as number));
   } catch (e) { next(e); }
 });
 customerRoutes.get('/home/feed', async (req, res, next) => {
@@ -94,7 +94,11 @@ customerRoutes.get('/shops', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 customerRoutes.get('/shops/:id', async (req, res, next) => {
-  try { sendSuccess(res, await svc.getShop(paramId(req))); } catch (e) { next(e); }
+  try {
+    const lat = req.query.lat ? parseFloat(req.query.lat as string) : undefined;
+    const lng = req.query.lng ? parseFloat(req.query.lng as string) : undefined;
+    sendSuccess(res, await svc.getShop(paramId(req), lat, lng));
+  } catch (e) { next(e); }
 });
 customerRoutes.get('/shops/:id/products', async (req, res, next) => {
   try { sendSuccess(res, await svc.getShopProducts(paramId(req), req.query.categoryId as string)); } catch (e) { next(e); }
