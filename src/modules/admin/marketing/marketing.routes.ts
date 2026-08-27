@@ -19,20 +19,40 @@ router.post('/banners', async (req, res, next) => {
     const data = z.object({
       title: z.string(),
       imageUrl: z.string(),
-      districtId: z.string().optional(),
-      linkUrl: z.string().optional(),
-      themeColor: z.string().optional(),
-      themeColorEnd: z.string().optional(),
+      videoUrl: z.string().nullable().optional(),
+      type: z.string().optional(),
+      row: z.number().optional(),
+      districtId: z.string().nullable().optional(),
+      linkUrl: z.string().nullable().optional(),
+      themeColor: z.string().nullable().optional(),
+      themeColorEnd: z.string().nullable().optional(),
       sortOrder: z.number().optional(),
       isActive: z.boolean().optional(),
-      startsAt: z.string().datetime().optional(),
-      endsAt: z.string().datetime().optional()
+      startsAt: z.string().nullable().optional(),
+      endsAt: z.string().nullable().optional()
     }).parse(req.body);
     sendSuccess(res, await prisma.banner.create({ data: { ...data, startsAt: data.startsAt ? new Date(data.startsAt) : undefined, endsAt: data.endsAt ? new Date(data.endsAt) : undefined } }), 201);
   } catch (e) { next(e); }
 });
 router.put('/banners/:id', async (req, res, next) => {
-  try { sendSuccess(res, await prisma.banner.update({ where: { id: paramId(req) }, data: req.body })); } catch (e) { next(e); }
+  try {
+    const data = z.object({
+      title: z.string().optional(),
+      imageUrl: z.string().optional(),
+      videoUrl: z.string().nullable().optional(),
+      type: z.string().optional(),
+      row: z.number().optional(),
+      districtId: z.string().nullable().optional(),
+      linkUrl: z.string().nullable().optional(),
+      themeColor: z.string().nullable().optional(),
+      themeColorEnd: z.string().nullable().optional(),
+      sortOrder: z.number().optional(),
+      isActive: z.boolean().optional(),
+      startsAt: z.string().nullable().optional(),
+      endsAt: z.string().nullable().optional()
+    }).parse(req.body);
+    sendSuccess(res, await prisma.banner.update({ where: { id: paramId(req) }, data: { ...data, startsAt: data.startsAt ? new Date(data.startsAt) : data.startsAt === null ? null : undefined, endsAt: data.endsAt ? new Date(data.endsAt) : data.endsAt === null ? null : undefined } })); 
+  } catch (e) { next(e); }
 });
 router.delete('/banners/:id', async (req, res, next) => {
   try { await prisma.banner.delete({ where: { id: paramId(req) } }); sendSuccess(res, { deleted: true }); } catch (e) { next(e); }
