@@ -211,20 +211,14 @@ export async function reverseGeocodeLocation(lat: number, lng: number) {
         if (data.status === 'OK' && data.results && data.results.length > 0) {
            const result = data.results.find((r: any) => !r.types.includes('plus_code')) || data.results[0];
            
-           let gLocal = '';
-           let gDistrict = '';
+           const getC = (t: string) => result.address_components.find((c: any) => c.types.includes(t))?.short_name;
+           const sub2 = getC('sublocality_level_2') || getC('neighborhood');
+           const sub1 = getC('sublocality_level_1');
+           const loc = getC('locality');
+           const route = getC('route');
            
-           for (const comp of result.address_components) {
-             if (comp.types.includes('locality')) gLocal = comp.short_name;
-             if (comp.types.includes('route') || comp.types.includes('sublocality_level_1')) {
-                gLocal = comp.short_name + (gLocal ? ', ' + gLocal : '');
-             }
-             if (comp.types.includes('administrative_area_level_3')) gDistrict = comp.short_name;
-           }
-           
-           if (!gLocal && result.formatted_address) {
-             gLocal = result.formatted_address.split(',')[0];
-           }
+           gLocal = [sub2, sub1, loc].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ') || route || result.formatted_address.split(',')[0];
+           gDistrict = getC('administrative_area_level_3') || getC('administrative_area_level_2') || '';
            
            local = gLocal || '';
            district = gDistrict || '';
@@ -430,18 +424,28 @@ export async function listShops(districtIdInput: string, areaId?: string, catego
     orderBy: { rating: 'desc' },
   });
 
-  let filteredVendors = allVendors;
+  let processedVendors = allVendors.map(v => {
+    let distance = -1;
+    let inDeliveryRadius = true;
+    if (lat && lng && v.latitude != null && v.longitude != null) {
+      distance = calculateDistance(lat, lng, v.latitude, v.longitude);
+      inDeliveryRadius = distance <= v.deliveryRadius;
+    } else if (areaId && v.areaId !== areaId) {
+      inDeliveryRadius = false;
+    }
+    return { ...v, distance: distance !== -1 ? distance : undefined, inDeliveryRadius };
+  });
+
   if (lat && lng) {
-    filteredVendors = allVendors.filter(v => {
-      if (v.latitude == null || v.longitude == null) return false;
-      const distance = calculateDistance(lat, lng, v.latitude, v.longitude);
-      return distance <= v.deliveryRadius;
+    processedVendors.sort((a, b) => {
+      if (a.distance === undefined && b.distance !== undefined) return 1;
+      if (b.distance === undefined && a.distance !== undefined) return -1;
+      if (a.distance !== undefined && b.distance !== undefined) return a.distance - b.distance;
+      return 0;
     });
-  } else if (areaId) {
-    filteredVendors = allVendors.filter(v => v.areaId === areaId);
   }
 
-  return filteredVendors;
+  return processedVendors;
 }
 
 export async function getShop(vendorId: string) {
@@ -541,7 +545,7 @@ export async function getProduct(productId: string, user?: { role: string; sub: 
 }
 
 // ─── Product List ───────────────────────────────────────────────────────────────
-export async function listProducts(categoryId?: string, districtIdInput?: string, sort?: string, page = 1, limit = 20) {
+export async function listProducts(categoryId?: string, districtIdInput?: string, sort?: string, page = 1, limit = 20, lat?: number, lng?: number) {
   const districtId = districtIdInput ? await resolveDistrictId(districtIdInput) : undefined;
   const skip = (page - 1) * limit;
   const orderBy: any =
@@ -550,10 +554,25 @@ export async function listProducts(categoryId?: string, districtIdInput?: string
     sort === 'name' ? { name: 'asc' } :
     { createdAt: 'desc' };
 
+  let allowedVendorIds: string[] | undefined;
+  if (lat !== undefined && lng !== undefined) {
+    const vendors = await prisma.vendor.findMany({
+      where: { status: 'APPROVED', isOpen: true, ...(districtId ? { districtId } : {}) },
+      select: { id: true, latitude: true, longitude: true, deliveryRadius: true }
+    });
+    allowedVendorIds = vendors
+      .filter(v => v.latitude != null && v.longitude != null && calculateDistance(lat, lng, v.latitude, v.longitude) <= v.deliveryRadius)
+      .map(v => v.id);
+      
+    if (allowedVendorIds.length === 0) {
+      return { products: [], total: 0, page, limit, totalPages: 0 };
+    }
+  }
+
   const where: any = {
     status: 'PUBLISHED',
     isActive: true,
-    ...(districtId ? { vendor: { districtId, status: 'APPROVED' } } : {}),
+    ...(allowedVendorIds ? { vendorId: { in: allowedVendorIds } } : districtId ? { vendor: { districtId, status: 'APPROVED' } } : {}),
     ...(categoryId ? { categoryId } : {}),
   };
 
@@ -583,7 +602,7 @@ export async function listProducts(categoryId?: string, districtIdInput?: string
 }
 
 // ─── Search ────────────────────────────────────────────────────────────────────
-export async function search(q: string, districtIdInput?: string, scope?: string, customerId?: string) {
+export async function search(q: string, districtIdInput?: string, scope?: string, customerId?: string, lat?: number, lng?: number) {
   const query = q.trim();
   if (!query) return { products: [], shops: [], categories: [] };
   const districtId = districtIdInput ? await resolveDistrictId(districtIdInput) : undefined;
@@ -592,13 +611,30 @@ export async function search(q: string, districtIdInput?: string, scope?: string
   const isPg = process.env.DATABASE_URL?.startsWith('postgres');
   const modeObj = isPg ? { mode: 'insensitive' } : {};
 
+  let allowedVendorIds: string[] | undefined;
+  if (lat !== undefined && lng !== undefined) {
+    const vendors = await prisma.vendor.findMany({
+      where: { status: 'APPROVED', isOpen: true, ...(districtId ? { districtId } : {}) },
+      select: { id: true, latitude: true, longitude: true, deliveryRadius: true }
+    });
+    allowedVendorIds = vendors
+      .filter(v => v.latitude != null && v.longitude != null && calculateDistance(lat, lng, v.latitude, v.longitude) <= v.deliveryRadius)
+      .map(v => v.id);
+  }
+
   const productWhere = {
     status: 'PUBLISHED' as const,
     OR: [
       { name: { contains: query, ...modeObj } },
       { brand: { contains: query, ...modeObj } },
     ],
-    ...(districtId ? { vendor: { districtId } } : {}),
+    ...(allowedVendorIds ? { vendorId: { in: allowedVendorIds } } : districtId ? { vendor: { districtId } } : {}),
+  } as any;
+  
+  const shopWhere = {
+    shopName: { contains: query, ...modeObj },
+    status: 'APPROVED',
+    ...(districtId ? { districtId } : {})
   } as any;
 
   const [products, shops, categories] = await Promise.all([
@@ -616,13 +652,16 @@ export async function search(q: string, districtIdInput?: string, scope?: string
       }
     }),
     scope === 'products' ? [] : prisma.vendor.findMany({ 
-      where: { shopName: { contains: query, ...modeObj }, status: 'APPROVED', ...(districtId ? { districtId } : {}) } as any, 
-      take: 10,
+      where: shopWhere, 
+      take: 20,
       select: {
         id: true,
         shopName: true,
         logoUrl: true,
         rating: true,
+        latitude: true,
+        longitude: true,
+        deliveryRadius: true,
         area: { select: { name: true } }
       }
     }),
@@ -632,7 +671,31 @@ export async function search(q: string, districtIdInput?: string, scope?: string
       select: { id: true, name: true, imageUrl: true }
     }),
   ]);
-  return { products, shops, categories };
+
+  const processedShops = (shops as any[]).map(v => {
+    let distance = -1;
+    let inDeliveryRadius = true;
+    if (lat !== undefined && lng !== undefined && v.latitude != null && v.longitude != null) {
+      distance = calculateDistance(lat, lng, v.latitude, v.longitude);
+      inDeliveryRadius = distance <= v.deliveryRadius;
+    }
+    return { 
+      id: v.id, shopName: v.shopName, logoUrl: v.logoUrl, rating: v.rating, area: v.area,
+      distance: distance !== -1 ? distance : undefined, 
+      inDeliveryRadius 
+    };
+  });
+
+  if (lat !== undefined && lng !== undefined) {
+    processedShops.sort((a, b) => {
+      if (a.distance === undefined && b.distance !== undefined) return 1;
+      if (b.distance === undefined && a.distance !== undefined) return -1;
+      if (a.distance !== undefined && b.distance !== undefined) return a.distance - b.distance;
+      return 0;
+    });
+  }
+
+  return { products, shops: processedShops.slice(0, 10), categories };
 }
 
 export async function getTrendingSearches(districtIdInput?: string) {

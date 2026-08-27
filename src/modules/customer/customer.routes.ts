@@ -101,8 +101,10 @@ customerRoutes.get('/shops/:id/products', async (req, res, next) => {
 });
 customerRoutes.get('/products', async (req, res, next) => {
   try {
-    const { categoryId, districtId, sort, page, limit } = req.query as Record<string, string>;
-    sendSuccess(res, await svc.listProducts(categoryId, districtId, sort, Number(page) || 1, Number(limit) || 20));
+    const { categoryId, districtId, sort, page, limit, lat, lng } = req.query as Record<string, string>;
+    const latitude = lat ? parseFloat(lat) : undefined;
+    const longitude = lng ? parseFloat(lng) : undefined;
+    sendSuccess(res, await svc.listProducts(categoryId, districtId, sort, Number(page) || 1, Number(limit) || 20, latitude, longitude));
   } catch (e) { next(e); }
 });
 customerRoutes.get('/products/:id', async (req, res, next) => {
@@ -111,7 +113,9 @@ customerRoutes.get('/products/:id', async (req, res, next) => {
 customerRoutes.get('/search', async (req, res, next) => {
   try {
     const customerId = req.user?.role === 'CUSTOMER' ? req.user.sub : undefined;
-    sendSuccess(res, await svc.search(req.query.q as string, req.query.districtId as string, req.query.scope as string, customerId));
+    const lat = req.query.lat ? parseFloat(req.query.lat as string) : undefined;
+    const lng = req.query.lng ? parseFloat(req.query.lng as string) : undefined;
+    sendSuccess(res, await svc.search(req.query.q as string, req.query.districtId as string, req.query.scope as string, customerId, lat, lng));
   } catch (e) { next(e); }
 });
 customerRoutes.get('/search/trending', async (req, res, next) => {
