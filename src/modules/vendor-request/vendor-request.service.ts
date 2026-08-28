@@ -46,6 +46,19 @@ export async function submitApplication(customerId: string) {
   });
   if (!request) throw new NotFoundError('No draft application found');
 
+  // Check if customer already has a vendor account
+  const existingVendorByCustomer = await prisma.vendor.findUnique({ where: { customerId } });
+  if (existingVendorByCustomer) {
+    throw new AppError('BAD_REQUEST', 'You already have an active Vendor account.', 400);
+  }
+
+  // Check if email is already used by another vendor
+  const vendorEmail = request.email ?? `vendor_${request.id}@districtmart.com`;
+  const existingVendorByEmail = await prisma.vendor.findUnique({ where: { email: vendorEmail } });
+  if (existingVendorByEmail) {
+    throw new AppError('BAD_REQUEST', 'The email associated with this request is already used by another vendor.', 400);
+  }
+
   const required = ['shopName', 'ownerName', 'mobileNumber', 'districtId', 'address', 'shopCategory', 'accountHolderName', 'accountNumber', 'ifscCode'];
   const missing = required.filter((k) => !request[k as keyof typeof request]);
   if (missing.length) throw new AppError('VALIDATION_ERROR', `Missing required fields: ${missing.join(', ')}`, 422);
@@ -174,7 +187,6 @@ export async function approveRequest(id: string, adminId: string) {
   const area = await prisma.area.findUnique({ where: { id: targetAreaId }, include: { district: true } });
   if (!area) throw new AppError('BAD_REQUEST', 'Area not found for this request', 400);
 
-  // Create the Vendor account
   const vendorCode = `VND-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
   const vendor = await prisma.vendor.create({
     data: {
