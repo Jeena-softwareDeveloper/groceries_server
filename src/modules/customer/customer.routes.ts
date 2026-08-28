@@ -73,6 +73,17 @@ customerRoutes.get('/home/feed', async (req, res, next) => {
 customerRoutes.get('/districts', async (_req, res, next) => {
   try { sendSuccess(res, await svc.listPublicDistricts()); } catch (e) { next(e); }
 });
+customerRoutes.get('/app/version', async (_req, res, next) => {
+  try {
+    const { prisma } = await import('../../lib/prisma.js');
+    const rows = await prisma.appSetting.findMany({ where: { key: { in: ['MIN_APP_VERSION', 'PLAY_STORE_URL'] } } });
+    const settings = Object.fromEntries(rows.map((r: any) => [r.key, r.value]));
+    sendSuccess(res, {
+      minVersion: settings['MIN_APP_VERSION'] ?? '0.1.0',
+      playStoreUrl: settings['PLAY_STORE_URL'] ?? 'https://play.google.com/store/apps/details?id=com.alltimemarket.app',
+    });
+  } catch (e) { next(e); }
+});
 customerRoutes.get('/areas', async (req, res, next) => {
   try {
     const districtId = req.query.districtId as string;

@@ -135,6 +135,19 @@ export async function approveRequest(id: string, adminId: string) {
   const req = await getRequest(id);
   if (req.status !== 'PENDING') throw new AppError('BAD_REQUEST', 'Only PENDING requests can be approved', 400);
 
+  // Check if customer already has a vendor account
+  const existingVendorByCustomer = await prisma.vendor.findUnique({ where: { customerId: req.customerId } });
+  if (existingVendorByCustomer) {
+    throw new AppError('BAD_REQUEST', 'This customer already has an active Vendor account.', 400);
+  }
+
+  // Check if email is already used by another vendor
+  const vendorEmail = req.email ?? `vendor_${id}@districtmart.com`;
+  const existingVendorByEmail = await prisma.vendor.findUnique({ where: { email: vendorEmail } });
+  if (existingVendorByEmail) {
+    throw new AppError('BAD_REQUEST', 'The email associated with this request is already used by another vendor.', 400);
+  }
+
   // Generate a temporary password for the vendor
   const tempPassword = Math.random().toString(36).slice(-8) + 'V@1';
   const passwordHash = await bcrypt.hash(tempPassword, 10);
@@ -168,7 +181,7 @@ export async function approveRequest(id: string, adminId: string) {
       areaId: area.id,
       districtId: area.districtId,
       customerId: req.customerId,
-      email: req.email ?? `vendor_${id}@districtmart.com`,
+      email: vendorEmail,
       passwordHash,
       shopName: req.shopName ?? 'My Shop',
       code: vendorCode,
