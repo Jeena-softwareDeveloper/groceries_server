@@ -3,6 +3,17 @@ import { z } from 'zod';
 import { paramId } from '../../../utils/params.js';
 import * as service from './vendor.service.js';
 import { sendSuccess } from '../../../utils/response.js';
+import { createVendorSchema } from '../admin.schemas.js';
+
+export async function create(req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = createVendorSchema.parse(req.body);
+    const result = await service.createVendor(data, req.user!.sub);
+    sendSuccess(res, result, 201);
+  } catch (e) {
+    next(e);
+  }
+}
 
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {

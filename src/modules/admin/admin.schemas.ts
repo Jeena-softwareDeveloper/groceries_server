@@ -34,3 +34,12 @@ export const adminUpdateProductSchema = z.object({
     })
   ).optional(),
 });
+
+export const createVendorSchema = z.object({
+  shopName: z.string().min(2, 'Shop name is required').transform(sanitize),
+  email: z.string().email('Invalid email address').transform(sanitize),
+  phone: z.string().min(10, 'Invalid phone number').transform(sanitize),
+  address: z.string().min(5, 'Address is required').transform(sanitize),
+  areaId: z.string().min(1, 'Area is required'),
+  districtId: z.string().min(1, 'District is required'),
+});

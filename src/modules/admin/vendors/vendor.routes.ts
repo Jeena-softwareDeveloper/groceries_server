@@ -3,6 +3,7 @@ import * as ctrl from './vendor.controller.js';
 
 export const vendorAdminRoutes = Router();
 
+vendorAdminRoutes.post('/', ctrl.create);
 vendorAdminRoutes.get('/', ctrl.list);
 vendorAdminRoutes.get('/:id', ctrl.get);
 vendorAdminRoutes.put('/:id', ctrl.update);

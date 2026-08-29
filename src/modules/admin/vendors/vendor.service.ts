@@ -1,6 +1,39 @@
 import { prisma } from '../../../lib/prisma.js';
 import { NotFoundError, ConflictError } from '../../../utils/errors.js';
+import bcrypt from 'bcryptjs';
 
+export async function createVendor(data: { shopName: string, email: string, phone: string, address: string, areaId: string, districtId: string }, adminId: string) {
+  const existingVendorByEmail = await prisma.vendor.findUnique({ where: { email: data.email } });
+  if (existingVendorByEmail) {
+    throw new ConflictError('A vendor with this email already exists.');
+  }
+
+  const tempPassword = Math.random().toString(36).slice(-8) + 'V@1';
+  const passwordHash = await bcrypt.hash(tempPassword, 10);
+
+  const baseSlug = data.shopName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  let slug = baseSlug;
+  let counter = 1;
+  while (await prisma.vendor.findUnique({ where: { slug } })) {
+    slug = `${baseSlug}-${counter++}`;
+  }
+
+  const vendorCode = `VND-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
+  const vendor = await prisma.vendor.create({
+    data: {
+      ...data,
+      passwordHash,
+      slug,
+      code: vendorCode,
+      status: 'APPROVED',
+      approvedAt: new Date(),
+      approvedBy: adminId,
+    }
+  });
+
+  return { vendor, tempPassword };
+}
 export async function listVendors(status?: string, page = 1, limit = 20) {
   const skip = (page - 1) * limit;
   const where = status ? { status: status as 'PENDING' | 'APPROVED' | 'REJECTED' | 'SUSPENDED' } : {};
