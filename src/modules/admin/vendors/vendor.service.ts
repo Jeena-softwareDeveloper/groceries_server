@@ -20,15 +20,28 @@ export async function createVendor(data: { shopName: string, email: string, phon
 
   const vendorCode = `VND-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
+  const normalizedPhone = data.phone.replace(/\D/g, '').slice(-10);
+  let customer = await prisma.customer.findUnique({ where: { phone: normalizedPhone } });
+  if (!customer) {
+    customer = await prisma.customer.create({
+      data: {
+        phone: normalizedPhone,
+        wallet: { create: {} },
+      }
+    });
+  }
+
   const vendor = await prisma.vendor.create({
     data: {
       ...data,
+      phone: normalizedPhone,
       passwordHash,
       slug,
       code: vendorCode,
       status: 'APPROVED',
       approvedAt: new Date(),
       approvedBy: adminId,
+      customerId: customer.id,
     }
   });
 

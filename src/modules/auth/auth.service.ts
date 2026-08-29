@@ -177,6 +177,15 @@ export async function verifyCustomerOtp(phone: string, otp: string, deviceName?:
 
   if (customer.isBlocked) throw new ForbiddenError('Account is blocked');
 
+  const approvedVendor = await prisma.vendor.findFirst({
+    where: { customerId: customer.id, status: 'APPROVED' }
+  });
+
+  if (approvedVendor) {
+    const tokens = await issueTokens({ sub: approvedVendor.id, role: 'VENDOR' }, deviceName, ipAddress, deviceId, deviceModel, osVersion);
+    return { ...tokens, isNewUser: false };
+  }
+
   const tokens = await issueTokens({ sub: customer.id, role: 'CUSTOMER' }, deviceName, ipAddress, deviceId, deviceModel, osVersion);
   return { ...tokens, isNewUser };
 }
