@@ -294,8 +294,9 @@ export async function refreshTokens(refreshToken: string) {
     throw new UnauthorizedError('Token revoked');
   }
 
-  await prisma.refreshToken.delete({ where: { token: refreshToken } });
-  return issueTokens(payload, stored.deviceName || undefined, stored.ipAddress || undefined, stored.deviceId || undefined, stored.deviceModel || undefined, stored.osVersion || undefined);
+  // Generate only a new access token to prevent Refresh Token Rotation race conditions
+  const accessToken = signAccessToken({ sub: payload.sub, role: payload.role });
+  return { accessToken, refreshToken, role: payload.role };
 }
 
 export async function logout(refreshToken: string) {
