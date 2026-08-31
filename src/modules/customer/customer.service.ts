@@ -172,7 +172,7 @@ export async function getHomeFeed(districtIdInput: string, areaId?: string, lat?
 
   const now = new Date();
   const [banners, categories, layoutSetting, deliveryRules] = await Promise.all([
-    prisma.banner.findMany({ where: { OR: [{ districtId }, { districtId: null }], isActive: true }, orderBy: { sortOrder: 'asc' }, take: 5 }),
+    prisma.banner.findMany({ where: { OR: [{ districtId }, { districtId: null }], isActive: true }, orderBy: { sortOrder: 'asc' }, take: 10 }),
     prisma.category.findMany({ where: { parentId: null, isActive: true }, orderBy: { sortOrder: 'asc' }, take: 12 }),
     prisma.appSetting.findUnique({ where: { key: 'HOME_PAGE_LAYOUT' } }),
     prisma.deliveryChargeRule.findFirst({ where: { OR: [{ districtId }, { districtId: null }], isActive: true } })
@@ -195,7 +195,7 @@ export async function getHomeFeedByLocation(lat: number, lng: number) {
   if (cached) return cached;
 
   const [banners, categories, layoutSetting, deliveryRules] = await Promise.all([
-    prisma.banner.findMany({ where: { isActive: true }, orderBy: { sortOrder: 'asc' }, take: 5 }),
+    prisma.banner.findMany({ where: { isActive: true }, orderBy: { sortOrder: 'asc' }, take: 10 }),
     prisma.category.findMany({ where: { parentId: null, isActive: true }, orderBy: { sortOrder: 'asc' }, take: 12 }),
     prisma.appSetting.findUnique({ where: { key: 'HOME_PAGE_LAYOUT' } }),
     prisma.deliveryChargeRule.findFirst({ where: { isActive: true } }),
