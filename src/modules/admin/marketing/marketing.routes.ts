@@ -4,9 +4,15 @@ import { prisma } from '../../../lib/prisma.js';
 import { sendSuccess } from '../../../utils/response.js';
 import { paramId } from '../../../utils/params.js';
 import { NotFoundError } from '../../../utils/errors.js';
+import { cacheDelPattern } from '../../../lib/redis.js';
 import type { Request, Response, NextFunction } from 'express';
 
 const router = Router();
+
+// Helper: flush all home-feed cache keys so banner changes are immediately visible
+async function flushHomeFeedCache() {
+  await cacheDelPattern('home:feed:*');
+}
 
 // ─── Banners ───────────────────────────────────────────────────────────────────
 router.get('/banners', async (_req, res, next) => {
@@ -32,6 +38,7 @@ router.post('/banners', async (req, res, next) => {
       endsAt: z.string().nullable().optional()
     }).parse(req.body);
     sendSuccess(res, await prisma.banner.create({ data: { ...data, startsAt: data.startsAt ? new Date(data.startsAt) : undefined, endsAt: data.endsAt ? new Date(data.endsAt) : undefined } }), 201);
+    await flushHomeFeedCache();
   } catch (e) { next(e); }
 });
 router.put('/banners/:id', async (req, res, next) => {
@@ -52,10 +59,11 @@ router.put('/banners/:id', async (req, res, next) => {
       endsAt: z.string().nullable().optional()
     }).parse(req.body);
     sendSuccess(res, await prisma.banner.update({ where: { id: paramId(req) }, data: { ...data, startsAt: data.startsAt ? new Date(data.startsAt) : data.startsAt === null ? null : undefined, endsAt: data.endsAt ? new Date(data.endsAt) : data.endsAt === null ? null : undefined } })); 
+    await flushHomeFeedCache();
   } catch (e) { next(e); }
 });
 router.delete('/banners/:id', async (req, res, next) => {
-  try { await prisma.banner.delete({ where: { id: paramId(req) } }); sendSuccess(res, { deleted: true }); } catch (e) { next(e); }
+  try { await prisma.banner.delete({ where: { id: paramId(req) } }); await flushHomeFeedCache(); sendSuccess(res, { deleted: true }); } catch (e) { next(e); }
 });
 
 // ─── Micro Banners ─────────────────────────────────────────────────────────────

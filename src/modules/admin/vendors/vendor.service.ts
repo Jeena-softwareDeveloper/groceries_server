@@ -142,9 +142,19 @@ export async function suspendVendor(id: string) {
 }
 
 export async function removeVendor(id: string) {
-  await getVendor(id);
+  const vendor = await getVendor(id);
   try {
-    return await prisma.vendor.delete({ where: { id } });
+    const deleted = await prisma.vendor.delete({ where: { id } });
+
+    // Reset the linked vendorRequest so the customer can re-apply from the app
+    if (vendor.customerId) {
+      await prisma.vendorRequest.updateMany({
+        where: { customerId: vendor.customerId, status: 'APPROVED' },
+        data: { status: 'REJECTED', rejectionReason: 'Vendor account was removed by admin.' },
+      });
+    }
+
+    return deleted;
   } catch (error: any) {
     if (error.code === 'P2003') {
       throw new ConflictError('Cannot delete this vendor because they have associated records (e.g., orders, products). Please suspend them instead.');
