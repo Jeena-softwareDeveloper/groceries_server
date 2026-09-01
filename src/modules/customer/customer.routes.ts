@@ -75,12 +75,10 @@ customerRoutes.get('/districts', async (_req, res, next) => {
 });
 customerRoutes.get('/app/version', async (_req, res, next) => {
   try {
-    const { prisma } = await import('../../lib/prisma.js');
-    const rows = await prisma.appSetting.findMany({ where: { key: { in: ['MIN_APP_VERSION', 'PLAY_STORE_URL'] } } });
-    const settings = Object.fromEntries(rows.map((r: any) => [r.key, r.value]));
+    const { env } = await import('../../config/env.js');
     sendSuccess(res, {
-      minVersion: settings['MIN_APP_VERSION'] ?? '0.1.0',
-      playStoreUrl: settings['PLAY_STORE_URL'] ?? 'https://play.google.com/store/apps/details?id=com.alltimemarket.app',
+      minVersion: env.MIN_APP_VERSION ?? '0.1.0',
+      playStoreUrl: env.PLAY_STORE_URL ?? 'https://play.google.com/store/apps/details?id=com.alltimemarket.app',
     });
   } catch (e) { next(e); }
 });

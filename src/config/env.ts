@@ -32,6 +32,9 @@ const envSchema = z.object({
   
   // Google Maps
   GOOGLE_MAP_API_KEY: z.string().optional(),
+  // App Update
+  MIN_APP_VERSION: z.string().optional(),
+  PLAY_STORE_URL: z.string().optional(),
 });
 
 
