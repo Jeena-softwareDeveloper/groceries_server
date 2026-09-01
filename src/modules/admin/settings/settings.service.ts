@@ -8,6 +8,8 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
   supportEmail: 'support@districtmart.com',
   supportPhone: '+910000000000',
   featureFlags: { wallet: false, cod: true, vendorApprovalRequired: true },
+  minAppVersion: '1.0.0',
+  playStoreUrl: 'https://play.google.com/store/apps/details?id=com.alltimemarket.app',
 };
 
 export async function getSettings() {

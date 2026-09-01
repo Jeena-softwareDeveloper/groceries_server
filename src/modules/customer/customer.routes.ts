@@ -75,10 +75,11 @@ customerRoutes.get('/districts', async (_req, res, next) => {
 });
 customerRoutes.get('/app/version', async (_req, res, next) => {
   try {
-    const { env } = await import('../../config/env.js');
+    const { getSettings } = await import('../admin/settings/settings.service.js');
+    const settings = await getSettings();
     sendSuccess(res, {
-      minVersion: env.MIN_APP_VERSION ?? '0.1.0',
-      playStoreUrl: env.PLAY_STORE_URL ?? 'https://play.google.com/store/apps/details?id=com.alltimemarket.app',
+      minVersion: (settings['minAppVersion'] as string) ?? '0.1.0',
+      playStoreUrl: (settings['playStoreUrl'] as string) ?? 'https://play.google.com/store/apps/details?id=com.alltimemarket.app',
     });
   } catch (e) { next(e); }
 });
