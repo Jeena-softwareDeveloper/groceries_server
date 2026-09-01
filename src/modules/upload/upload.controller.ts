@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import path from 'path';
 import * as ftp from 'basic-ftp';
 import { env } from '../../config/env.js';
+import sharp from 'sharp';
 
 export async function uploadFile(req: Request, res: Response): Promise<void> {
   try {
@@ -16,10 +17,21 @@ export async function uploadFile(req: Request, res: Response): Promise<void> {
     const requestedFolder = (req.body.folder as string) || 'misc';
     const folder = `all-time-market/${requestedFolder}`;
     
-    const ext = path.extname(req.file.originalname) || '.jpg';
+    let fileBuffer = req.file.buffer;
+    let ext = path.extname(req.file.originalname) || '.jpg';
+    
+    // Process image files with sharp
+    if (req.file.mimetype.startsWith('image/')) {
+      fileBuffer = await sharp(req.file.buffer)
+        .resize(1024, null, { withoutEnlargement: true }) // Max width 1024px, maintain aspect ratio
+        .webp({ quality: 80 }) // Convert to WebP with 80% quality
+        .toBuffer();
+      ext = '.webp';
+    }
+
     const filename = `${crypto.randomUUID()}${ext}`;
 
-    const relativePath = await uploadToFTP(req.file.buffer, folder, filename);
+    const relativePath = await uploadToFTP(fileBuffer, folder, filename);
 
     // Return the local server URL which will proxy to FTP
     const baseUrl = process.env.IMAGE_BASE_URL || 'http://localhost:4000/uploads';
