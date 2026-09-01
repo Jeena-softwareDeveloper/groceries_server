@@ -146,68 +146,33 @@ export async function getHomeFeed(districtIdInput: string, areaId?: string, lat?
     return getHomeFeedByLocation(lat, lng!);
   }
   const districtId = await resolveDistrictId(districtIdInput);
-  const cacheKey = `home:feed:${districtId}:${areaId ?? 'all'}:${lat ?? 0}:${lng ?? 0}`;
+  const cacheKey = `home:feed:${districtId}:${areaId ?? 'all'}`;
   
   const cached = await cacheGet<unknown>(cacheKey);
   if (cached) return cached;
   
-  const allVendors = await prisma.vendor.findMany({
-    where: { districtId, status: 'APPROVED', isOpen: true },
-    select: { id: true, shopName: true, slug: true, logoUrl: true, bannerUrl: true, rating: true, minOrderValue: true, latitude: true, longitude: true, deliveryRadius: true, areaId: true, area: { select: { latitude: true, longitude: true } } },
-  });
-
-  let filteredVendors = allVendors;
-  if (lat && lng) {
-    filteredVendors = allVendors.filter(v => {
-      const point = vendorLatLng(v);
-      if (!point) return false;
-      return calculateDistance(lat, lng, point.lat, point.lng) <= v.deliveryRadius;
-    });
-  } else if (areaId) {
-    filteredVendors = allVendors.filter(v => v.areaId === areaId);
-  }
-
-  const vendors = filteredVendors.slice(0, 10);
-  const vendorIds = vendors.map(v => v.id);
-
-  const now = new Date();
-  const [banners, categories, layoutSetting, deliveryRules] = await Promise.all([
+  const [banners, categories] = await Promise.all([
     prisma.banner.findMany({ where: { OR: [{ districtId }, { districtId: null }], isActive: true }, orderBy: { sortOrder: 'asc' }, take: 10 }),
     prisma.category.findMany({ where: { parentId: null, isActive: true }, orderBy: { sortOrder: 'asc' }, take: 12 }),
-    prisma.appSetting.findUnique({ where: { key: 'HOME_PAGE_LAYOUT' } }),
-    prisma.deliveryChargeRule.findFirst({ where: { OR: [{ districtId }, { districtId: null }], isActive: true } })
   ]);
 
-  const feed = {
-    banners,
-    categories,
-    layout: layoutSetting?.value || null,
-    deliveryRule: deliveryRules || null,
-  };
+  const feed = { banners, categories };
   await cacheSet(cacheKey, feed, 120);
   return feed;
 }
 
-/** GPS-first home feed — no districtId needed. Always returns catalog; vendor lists use listShops. */
+/** GPS-first home feed — no districtId needed. Only returns banners and categories. */
 export async function getHomeFeedByLocation(lat: number, lng: number) {
   const cacheKey = `home:feed:gps:${lat.toFixed(4)}:${lng.toFixed(4)}`;
   const cached = await cacheGet<unknown>(cacheKey);
   if (cached) return cached;
 
-  const [banners, categories, layoutSetting, deliveryRules] = await Promise.all([
+  const [banners, categories] = await Promise.all([
     prisma.banner.findMany({ where: { isActive: true }, orderBy: { sortOrder: 'asc' }, take: 10 }),
     prisma.category.findMany({ where: { parentId: null, isActive: true }, orderBy: { sortOrder: 'asc' }, take: 12 }),
-    prisma.appSetting.findUnique({ where: { key: 'HOME_PAGE_LAYOUT' } }),
-    prisma.deliveryChargeRule.findFirst({ where: { isActive: true } }),
   ]);
 
-  const feed = {
-    serviced: true,
-    banners,
-    categories,
-    layout: layoutSetting?.value || null,
-    deliveryRule: deliveryRules || null,
-  };
+  const feed = { serviced: true, banners, categories };
   await cacheSet(cacheKey, feed, 120);
   return feed;
 }
