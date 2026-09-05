@@ -169,12 +169,23 @@ export async function approveRequest(id: string, adminId: string) {
   }
 
   // Find area with district
+  let targetDistrictId = req.districtId;
+  if (!targetDistrictId) {
+    let fallbackDistrict = await prisma.district.findFirst();
+    if (!fallbackDistrict) {
+      fallbackDistrict = await prisma.district.create({
+        data: { name: 'Default District', code: 'DEFAULT' }
+      });
+    }
+    targetDistrictId = fallbackDistrict.id;
+  }
+
   let targetAreaId = req.areaId;
   if (!targetAreaId) {
-    let fallbackArea = await prisma.area.findFirst({ where: { districtId: req.districtId ?? '' } });
+    let fallbackArea = await prisma.area.findFirst({ where: { districtId: targetDistrictId } });
     if (!fallbackArea) {
       fallbackArea = await prisma.area.create({
-        data: { name: 'Main Area', districtId: req.districtId ?? '', isActive: true }
+        data: { name: 'Main Area', districtId: targetDistrictId, isActive: true }
       });
     }
     targetAreaId = fallbackArea.id;
