@@ -316,7 +316,14 @@ export async function publishProduct(vendorId: string, productId: string, status
 export async function deleteProduct(vendorId: string, productId: string) {
   const product = await prisma.product.findFirst({ where: { id: productId, vendorId } });
   if (!product) throw new NotFoundError('Product not found');
-  await prisma.product.delete({ where: { id: productId } });
+  try {
+    await prisma.product.delete({ where: { id: productId } });
+  } catch (e: any) {
+    await prisma.product.update({
+      where: { id: productId },
+      data: { isActive: false, status: 'REJECTED' }
+    });
+  }
   await invalidateVendorCache(vendorId);
 }
 
@@ -358,7 +365,14 @@ export async function adminUpdateProduct(productId: string, data: Partial<Produc
 export async function adminDeleteProduct(productId: string) {
   const product = await prisma.product.findUnique({ where: { id: productId } });
   if (!product) throw new NotFoundError('Product not found');
-  await prisma.product.delete({ where: { id: productId } });
+  try {
+    await prisma.product.delete({ where: { id: productId } });
+  } catch (e: any) {
+    await prisma.product.update({
+      where: { id: productId },
+      data: { isActive: false, status: 'REJECTED' }
+    });
+  }
   await invalidateVendorCache(product.vendorId);
 }
 
