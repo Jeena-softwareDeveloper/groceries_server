@@ -59,7 +59,7 @@ export async function submitApplication(customerId: string) {
     throw new AppError('BAD_REQUEST', 'The email associated with this request is already used by another vendor.', 400);
   }
 
-  const required = ['shopName', 'ownerName', 'mobileNumber', 'districtId', 'address', 'shopCategory', 'accountHolderName', 'accountNumber', 'ifscCode'];
+  const required = ['shopName', 'ownerName', 'mobileNumber', 'address', 'shopCategory', 'accountHolderName', 'accountNumber', 'ifscCode'];
   const missing = required.filter((k) => !request[k as keyof typeof request]);
   if (missing.length) throw new AppError('VALIDATION_ERROR', `Missing required fields: ${missing.join(', ')}`, 422);
 
@@ -78,12 +78,7 @@ export async function submitApplication(customerId: string) {
     throw new AppError('VALIDATION_ERROR', 'Enter a valid bank account number (9-18 digits)', 422);
   }
 
-  if (request.districtId) {
-    const areaCount = await prisma.area.count({ where: { districtId: request.districtId, isActive: true } });
-    if (areaCount > 0 && !request.areaId) {
-      throw new AppError('VALIDATION_ERROR', 'Please select an area', 422);
-    }
-  }
+
 
   const updatedReq = await prisma.vendorRequest.update({
     where: { id: request.id },
