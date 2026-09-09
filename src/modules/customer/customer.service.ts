@@ -516,7 +516,7 @@ export async function getProduct(productId: string, user?: { role: string; sub: 
       inventory: { select: { stock: true } },
       category: { select: { name: true } },
       subCategory: { select: { name: true } },
-      vendor: { select: { id: true, shopName: true, slug: true } },
+      vendor: { select: { id: true, shopName: true, slug: true, phone: true } },
       reviews: { where: { isVisible: true }, take: 10, select: { rating: true, comment: true, createdAt: true, customer: { select: { name: true } } } }
     }
   });
