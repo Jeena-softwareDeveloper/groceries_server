@@ -194,42 +194,47 @@ export async function approveRequest(id: string, adminId: string) {
   if (!area) throw new AppError('BAD_REQUEST', 'Area not found for this request', 400);
 
   const vendorCode = `VND-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-  const vendor = await prisma.vendor.create({
-    data: {
-      areaId: area.id,
-      districtId: area.districtId,
-      customerId: req.customerId,
-      email: vendorEmail,
-      passwordHash,
-      shopName: req.shopName ?? 'My Shop',
-      code: vendorCode,
-      slug,
-      description: req.description,
-      logoUrl: req.logoUrl,
-      bannerUrl: req.bannerUrl,
-      address: req.address ?? '',
-      landmark: req.landmark,
-      latitude: req.latitude,
-      longitude: req.longitude,
-      phone: req.mobileNumber ?? '',
-      fssaiNumber: req.fssaiNumber,
-      gstNumber: req.gstNumber,
-      fssaiDocUrl: req.fssaiCertUrl,
-      gstDocUrl: req.gstCertUrl,
-      bankAccountNo: req.accountNumber,
-      bankIfsc: req.ifscCode,
-      bankHolderName: req.accountHolderName,
-      deliveryRadius: req.deliveryRadius ?? 5,
-      status: 'APPROVED',
-      approvedAt: new Date(),
-      approvedBy: adminId,
-    },
-  });
 
-  // Update the request
-  await prisma.vendorRequest.update({
-    where: { id },
-    data: { status: 'APPROVED', reviewedBy: adminId, reviewedAt: new Date() },
+  // Run vendor create + request update atomically so we never get APPROVED request without a vendor record
+  const { vendor } = await prisma.$transaction(async (tx) => {
+    const createdVendor = await tx.vendor.create({
+      data: {
+        areaId: area.id,
+        districtId: area.districtId,
+        customerId: req.customerId,
+        email: vendorEmail,
+        passwordHash,
+        shopName: req.shopName ?? 'My Shop',
+        code: vendorCode,
+        slug,
+        description: req.description,
+        logoUrl: req.logoUrl,
+        bannerUrl: req.bannerUrl,
+        address: req.address ?? '',
+        landmark: req.landmark,
+        latitude: req.latitude,
+        longitude: req.longitude,
+        phone: req.mobileNumber ?? '',
+        fssaiNumber: req.fssaiNumber,
+        gstNumber: req.gstNumber,
+        fssaiDocUrl: req.fssaiCertUrl,
+        gstDocUrl: req.gstCertUrl,
+        bankAccountNo: req.accountNumber,
+        bankIfsc: req.ifscCode,
+        bankHolderName: req.accountHolderName,
+        deliveryRadius: req.deliveryRadius ?? 5,
+        status: 'APPROVED',
+        approvedAt: new Date(),
+        approvedBy: adminId,
+      },
+    });
+
+    await tx.vendorRequest.update({
+      where: { id },
+      data: { status: 'APPROVED', reviewedBy: adminId, reviewedAt: new Date() },
+    });
+
+    return { vendor: createdVendor };
   });
 
   // Notify the customer — never persist plaintext passwords in notifications
@@ -241,7 +246,7 @@ export async function approveRequest(id: string, adminId: string) {
       body: `Congratulations! Your shop "${req.shopName}" has been approved. Use your registered email to log in to the Vendor Panel. Check your email/SMS for temporary login details.`,
       data: { vendorId: vendor.id },
     },
-  });
+  }).catch(e => console.error('Notification create failed (non-critical):', e));
 
   // tempPassword returned only to admin API response (send via secure channel once)
   return { vendor, tempPassword };

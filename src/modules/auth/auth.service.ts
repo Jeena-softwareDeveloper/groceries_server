@@ -13,7 +13,7 @@ import {
   type JwtPayload,
 } from '../../lib/jwt.js';
 import twilio from 'twilio';
-import { ForbiddenError, UnauthorizedError, ValidationError } from '../../utils/errors.js';
+import { AppError, ForbiddenError, UnauthorizedError, ValidationError } from '../../utils/errors.js';
 import type { UserRole } from '../../types/index.js';
 
 const SALT_ROUNDS = 12;
@@ -206,7 +206,14 @@ export async function switchToVendor(customerId: string, deviceName?: string, ip
   const vendor = await prisma.vendor.findFirst({
     where: { customerId, status: 'APPROVED' },
   });
-  if (!vendor) throw new ForbiddenError('Not an approved vendor');
+  if (!vendor) {
+    // Check if there's an approved vendor request without a vendor record (partial failure)
+    const approvedReq = await prisma.vendorRequest.findFirst({ where: { customerId, status: 'APPROVED' } });
+    if (approvedReq) {
+      throw new AppError('CONFLICT', 'Your application is approved but the vendor account setup is incomplete. Please contact support.', 409);
+    }
+    throw new ForbiddenError('Not an approved vendor');
+  }
   
   return issueTokens({ sub: vendor.id, role: 'VENDOR' }, deviceName, ipAddress, deviceId, deviceModel, osVersion);
 }
