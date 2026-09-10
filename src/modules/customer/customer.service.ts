@@ -770,7 +770,7 @@ export async function getCart(customerId: string) {
       productId: true,
       quantity: true,
       vendorId: true,
-      vendor: { select: { id: true, shopName: true, minOrderValue: true, districtId: true } },
+      vendor: { select: { id: true, shopName: true, minOrderValue: true, districtId: true, latitude: true, longitude: true } },
       product: {
         select: {
           id: true,

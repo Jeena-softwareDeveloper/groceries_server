@@ -322,7 +322,7 @@ export async function getMe(userId: string, role: UserRole) {
     case 'SUPER_ADMIN': {
       const admin = await prisma.superAdmin.findUnique({ where: { id: userId } });
       if (!admin) return null;
-      return { id: admin.id, email: admin.email, name: admin.name, role: 'SUPER_ADMIN' as const };
+      return { id: admin.id, email: admin.email, name: admin.name, role: 'SUPER_ADMIN' as const, createdAt: admin.createdAt };
     }
     case 'VENDOR': {
       const vendor = await prisma.vendor.findUnique({ where: { id: userId } });
@@ -333,6 +333,7 @@ export async function getMe(userId: string, role: UserRole) {
         shopName: vendor.shopName,
         status: vendor.status,
         role: 'VENDOR' as const,
+        createdAt: vendor.createdAt,
       };
     }
     case 'CUSTOMER': {
@@ -344,6 +345,7 @@ export async function getMe(userId: string, role: UserRole) {
         email: customer.email,
         name: customer.name,
         role: 'CUSTOMER' as const,
+        createdAt: customer.createdAt,
       };
     }
     default:

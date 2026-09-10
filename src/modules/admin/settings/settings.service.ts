@@ -5,6 +5,8 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
   taxPercent: 5,
   platformFee: 5,
   deliveryFee: 0,
+  isDeliveryKmBased: false,
+  deliveryFeePerKm: 10,
   supportEmail: 'support@districtmart.com',
   supportPhone: '+910000000000',
   featureFlags: { wallet: false, cod: true, vendorApprovalRequired: true },
