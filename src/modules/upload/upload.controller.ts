@@ -34,7 +34,7 @@ export async function uploadFile(req: Request, res: Response): Promise<void> {
     const relativePath = await uploadToFTP(fileBuffer, folder, filename);
 
     // Return the local server URL which will proxy to FTP
-    const baseUrl = process.env.IMAGE_BASE_URL || 'http://localhost:4000/uploads';
+    const baseUrl = env.IMAGE_BASE_URL;
     const finalUrl = `${baseUrl}/${relativePath}`;
 
     sendSuccess(res, { url: finalUrl });
