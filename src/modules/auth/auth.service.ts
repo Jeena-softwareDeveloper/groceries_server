@@ -63,20 +63,20 @@ export async function requestCustomerOtp(
 ): Promise<{ message: string; otp?: string; autoLogin?: boolean; tokens?: any }> {
   const normalized = assertValidPhone(phone);
 
-  if (deviceId) {
-    const customer = await prisma.customer.findUnique({ where: { phone: normalized } });
-    if (customer) {
-      if (customer.isBlocked) throw new ForbiddenError('Account is blocked');
-      
-      const trustedSession = await prisma.refreshToken.findFirst({
-        where: { userId: customer.id, deviceId, expiresAt: { gt: new Date() } },
-        orderBy: { createdAt: 'desc' }
-      });
+  const customer = await prisma.customer.findUnique({ where: { phone: normalized } });
+  if (customer && customer.isBlocked) {
+    throw new ForbiddenError('This account is suspended. Please contact support.');
+  }
 
-      if (trustedSession) {
-        const tokens = await issueTokens({ sub: customer.id, role: 'CUSTOMER' }, deviceName, ipAddress, deviceId, deviceModel, osVersion);
-        return { message: 'Trusted device login successful', autoLogin: true, tokens };
-      }
+  if (deviceId && customer) {
+    const trustedSession = await prisma.refreshToken.findFirst({
+      where: { userId: customer.id, deviceId, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    if (trustedSession) {
+      const tokens = await issueTokens({ sub: customer.id, role: 'CUSTOMER' }, deviceName, ipAddress, deviceId, deviceModel, osVersion);
+      return { message: 'Trusted device login successful', autoLogin: true, tokens };
     }
   }
 
@@ -175,7 +175,7 @@ export async function verifyCustomerOtp(phone: string, otp: string, deviceName?:
     });
   }
 
-  if (customer.isBlocked) throw new ForbiddenError('Account is blocked');
+  if (customer.isBlocked) throw new ForbiddenError('This account is suspended. Please contact support.');
 
   const approvedVendor = await prisma.vendor.findFirst({
     where: { customerId: customer.id, status: 'APPROVED' }
@@ -299,6 +299,13 @@ export async function refreshTokens(refreshToken: string) {
   const redis = getRedis();
   if (redis && (await redis.get(`blacklist:${refreshToken}`))) {
     throw new UnauthorizedError('Token revoked');
+  }
+
+  if (payload.role === 'CUSTOMER') {
+    const customer = await prisma.customer.findUnique({ where: { id: payload.sub } });
+    if (!customer || customer.isBlocked) {
+      throw new ForbiddenError('This account is suspended. Please contact support.');
+    }
   }
 
   // Generate only a new access token to prevent Refresh Token Rotation race conditions
