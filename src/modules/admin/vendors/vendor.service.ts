@@ -94,16 +94,23 @@ export async function updateVendor(id: string, data: any) {
     mobileNumber: 'phone',
     accountNumber: 'bankAccountNo',
     ifscCode: 'bankIfsc',
+    // Frontend sends 'bankName' but schema field is 'bankHolderName'
+    bankName: 'bankHolderName',
+    accountHolderName: 'bankHolderName',
+    // Frontend may send alternate cert/doc URL names
+    fssaiCertUrl: 'fssaiDocUrl',
+    gstCertUrl: 'gstDocUrl',
   };
 
   const updatableFields = [
     'shopName', 'email', 'phone', 'description', 'address',
     'areaId', 'districtId', 'deliveryRadius', 'minOrderValue',
-    'gstNumber', 'fssaiNumber', 'bankName', 'accountHolderName',
-    'bankAccountNo', 'bankIfsc', 'upiId', 'logoUrl', 'bannerUrl',
-    'ownerPhotoUrl', 'govtIdUrl', 'gstCertUrl', 'fssaiCertUrl',
+    'gstNumber', 'fssaiNumber', 'bankHolderName',
+    'bankAccountNo', 'bankIfsc', 'logoUrl', 'bannerUrl',
+    'fssaiDocUrl', 'gstDocUrl',
     'latitude', 'longitude', 'isOpen', 'operatingHours',
   ];
+
   
   const updateData: any = {};
 
