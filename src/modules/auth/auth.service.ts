@@ -203,12 +203,19 @@ export async function loginVendor(email: string, password: string, deviceName?: 
 }
 
 export async function switchToVendor(customerId: string, deviceName?: string, ipAddress?: string, deviceId?: string, deviceModel?: string, osVersion?: string) {
+  // If called with a vendorId (user already has VENDOR token), resolve the actual customerId first
+  const possibleVendor = await prisma.vendor.findUnique({
+    where: { id: customerId },
+    select: { customerId: true },
+  });
+  const resolvedCustomerId = possibleVendor?.customerId ?? customerId;
+
   const vendor = await prisma.vendor.findFirst({
-    where: { customerId, status: 'APPROVED' },
+    where: { customerId: resolvedCustomerId, status: 'APPROVED' },
   });
   if (!vendor) {
     // Check if there's an approved vendor request without a vendor record (partial failure)
-    const approvedReq = await prisma.vendorRequest.findFirst({ where: { customerId, status: 'APPROVED' } });
+    const approvedReq = await prisma.vendorRequest.findFirst({ where: { customerId: resolvedCustomerId, status: 'APPROVED' } });
     if (approvedReq) {
       throw new AppError('CONFLICT', 'Your application is approved but the vendor account setup is incomplete. Please contact support.', 409);
     }

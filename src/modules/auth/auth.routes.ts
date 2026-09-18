@@ -27,7 +27,7 @@ authRoutes.post('/refresh', authRateLimiter, refresh);
 authRoutes.post('/logout', logout);
 authRoutes.get('/me', authenticate, me);
 
-authRoutes.post('/switch-to-vendor', authenticate, authorize('CUSTOMER'), switchToVendor);
+authRoutes.post('/switch-to-vendor', authenticate, authorize('CUSTOMER', 'VENDOR'), switchToVendor);
 authRoutes.post('/switch-to-customer', authenticate, authorize('VENDOR'), switchToCustomer);
 
 authRoutes.get('/sessions', authenticate, getSessions);
