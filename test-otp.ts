@@ -1,46 +1,36 @@
-import twilio from 'twilio';
 import dotenv from 'dotenv';
 import path from 'path';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
-async function sendOTP() {
-  const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_API_KEY, TWILIO_API_SECRET, TWILIO_VERIFY_SERVICE_SID } = process.env;
+import { sendFast2SmsOtp } from './src/lib/sms.js';
 
+async function testOtpDelivery() {
+  const phone = process.argv[2] || '9025255639';
+  const testOtp = Math.floor(100000 + Math.random() * 900000).toString();
 
-  const phone = process.argv[2] || '9344193569';
-  const toNumber = phone.startsWith('+') ? phone : `+91${phone.replace(/\D/g, '').slice(-10)}`;
+  console.log('🧪 Testing Server OTP Service');
+  console.log(`📱 Phone: ${phone}`);
+  console.log(`🔢 OTP: ${testOtp}`);
 
-  console.log('🔐 Twilio OTP Test');
-  console.log(`📱 Sending OTP to: ${toNumber}`);
-  console.log(`🔑 Account SID: ${TWILIO_ACCOUNT_SID?.slice(0, 8)}...`);
-  console.log(`🔑 Verify SID:  ${TWILIO_VERIFY_SERVICE_SID}`);
+  const result = await sendFast2SmsOtp(phone, testOtp);
+  console.log('\nResult from sendFast2SmsOtp:', result);
 
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_VERIFY_SERVICE_SID) {
-    console.error('❌ Missing Twilio credentials in .env!');
-    process.exit(1);
-  }
-
-  try {
-    // Use API Key auth if available (new upgraded account), else fallback to Auth Token
-    const client = (TWILIO_API_KEY && TWILIO_API_SECRET)
-      ? twilio(TWILIO_API_KEY, TWILIO_API_SECRET, { accountSid: TWILIO_ACCOUNT_SID })
-      : twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
-
-    const verification = await client.verify.v2
-      .services(TWILIO_VERIFY_SERVICE_SID)
-      .verifications.create({ to: toNumber, channel: 'sms' });
-
-    console.log('\n✅ OTP Sent Successfully!');
-    console.log(`   Status : ${verification.status}`);
-    console.log(`   To     : ${verification.to}`);
-    console.log(`   Channel: ${verification.channel}`);
-  } catch (error: any) {
-    console.error('\n❌ Failed to send OTP:');
-    console.error(`   Code   : ${error.code}`);
-    console.error(`   Message: ${error.message}`);
-    if (error.moreInfo) console.error(`   Info   : ${error.moreInfo}`);
+  if (result.success && result.requestId) {
+    console.log('⏳ Checking real telecom DLR in 4 seconds...');
+    await new Promise((r) => setTimeout(r, 4000));
+    try {
+      const apiKey = process.env.FAST2SMS_API_KEY;
+      const res = await fetch(`https://www.fast2sms.com/dev/dlr/${result.requestId}`, {
+        headers: { authorization: apiKey! },
+      });
+      const d = await res.json();
+      console.log('Telecom Delivery Report:');
+      console.dir(d?.data?.[0]?.delivery_status?.[0], { depth: null });
+    } catch (e: any) {
+      console.log('DLR check skipped:', e.message);
+    }
   }
 }
 
-sendOTP();
+testOtpDelivery();

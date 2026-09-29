@@ -12,7 +12,7 @@ import {
   verifyRefreshToken,
   type JwtPayload,
 } from '../../lib/jwt.js';
-import twilio from 'twilio';
+import { sendFast2SmsOtp } from '../../lib/sms.js';
 import { AppError, ForbiddenError, UnauthorizedError, ValidationError } from '../../utils/errors.js';
 import type { UserRole } from '../../types/index.js';
 
@@ -45,11 +45,12 @@ function assertValidPhone(phone: string): string {
 }
 
 function isTestPhone(phone: string): boolean {
-  return isDev && phone === TEST_PHONE;
+  return phone === TEST_PHONE;
 }
 
 function generateOtp(phone: string): string {
-  if (isDev) return TEST_OTP;
+  if (isTestPhone(phone)) return TEST_OTP;
+  if (isDev && !env.FAST2SMS_API_KEY) return TEST_OTP;
   return String(randomInt(100000, 999999));
 }
 
@@ -82,41 +83,33 @@ export async function requestCustomerOtp(
 
   await prisma.otpSession.deleteMany({ where: { phone: normalized } });
 
-  const shouldSendSms =
-    !!(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_VERIFY_SERVICE_SID);
+  const otp = generateOtp(normalized);
+  await prisma.otpSession.create({
+    data: {
+      phone: normalized,
+      otp,
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+    },
+  });
 
-  if (shouldSendSms) {
-    try {
-      const client = twilio(env.TWILIO_ACCOUNT_SID!, env.TWILIO_AUTH_TOKEN!);
-      await client.verify.v2.services(env.TWILIO_VERIFY_SERVICE_SID!).verifications.create({
-        to: `+91${normalized}`,
-        channel: 'sms'
-      });
-    } catch (e) {
-      console.error('Twilio Verify error', e);
-      throw new ValidationError('Failed to send OTP. Please try again.');
+  if (env.FAST2SMS_API_KEY && !isTestPhone(normalized)) {
+    const smsResult = await sendFast2SmsOtp(normalized, otp);
+    if (!smsResult.success) {
+      console.error(`[Auth] Fast2SMS OTP send failed for ${normalized}:`, smsResult.message);
+      if (!isDev) {
+        throw new ValidationError(smsResult.message || 'Failed to send OTP SMS. Please try again.');
+      }
     }
-    
-    return { message: 'OTP sent successfully' };
-  } else {
-    if (!isDev) {
-      console.warn('Twilio Verify credentials missing — OTP generated but not sent for', normalized);
-    }
-    
-    const otp = generateOtp(normalized);
-    await prisma.otpSession.create({
-      data: {
-        phone: normalized,
-        otp,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-      },
-    });
-
-    return {
-      message: 'OTP sent successfully',
-      ...(isDev ? { otp } : {}),
-    };
+  } else if (!isDev) {
+    console.warn('Fast2SMS credentials missing — OTP generated in DB but SMS not dispatched for', normalized);
   }
+
+  console.log(`[Auth] OTP for ${normalized}: ${otp}`);
+
+  return {
+    message: 'OTP sent successfully',
+    ...(isDev ? { otp } : {}),
+  };
 }
 
 export async function verifyCustomerOtp(phone: string, otp: string, deviceName?: string, ipAddress?: string, deviceId?: string, deviceModel?: string, osVersion?: string) {
@@ -126,23 +119,8 @@ export async function verifyCustomerOtp(phone: string, otp: string, deviceName?:
     throw new ValidationError('Invalid OTP');
   }
 
-  const shouldVerifySms =
-    !!(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_VERIFY_SERVICE_SID);
-
-  if (shouldVerifySms) {
-    try {
-      const client = twilio(env.TWILIO_ACCOUNT_SID!, env.TWILIO_AUTH_TOKEN!);
-      const verification = await client.verify.v2.services(env.TWILIO_VERIFY_SERVICE_SID!).verificationChecks.create({
-        to: `+91${normalized}`,
-        code: otp
-      });
-      if (verification.status !== 'approved') {
-        throw new ValidationError('Invalid OTP');
-      }
-    } catch (e) {
-      console.error('Twilio Verify check error', e);
-      throw new ValidationError('Invalid OTP');
-    }
+  if (isTestPhone(normalized) && otp === TEST_OTP) {
+    // Test account bypass
   } else {
     const session = await prisma.otpSession.findFirst({
       where: { phone: normalized },
