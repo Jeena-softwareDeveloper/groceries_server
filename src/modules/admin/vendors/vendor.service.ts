@@ -1,11 +1,48 @@
 import { prisma } from '../../../lib/prisma.js';
-import { NotFoundError, ConflictError } from '../../../utils/errors.js';
+import { NotFoundError, ConflictError, ValidationError } from '../../../utils/errors.js';
 import bcrypt from 'bcryptjs';
 
 export async function createVendor(data: { shopName: string, email: string, phone: string, address: string, areaId: string, districtId: string }, adminId: string) {
+  // 1. Check if vendor with this email already exists
   const existingVendorByEmail = await prisma.vendor.findUnique({ where: { email: data.email } });
   if (existingVendorByEmail) {
     throw new ConflictError('A vendor with this email already exists.');
+  }
+
+  // 2. Validate Area and District
+  const area = await prisma.area.findFirst({
+    where: { id: data.areaId, districtId: data.districtId }
+  });
+  if (!area) {
+    throw new NotFoundError('Selected area does not exist or does not belong to the selected district.');
+  }
+
+  // 3. Normalize and validate phone
+  const normalizedPhone = data.phone.replace(/\D/g, '').slice(-10);
+  if (!/^[6-9]\d{9}$/.test(normalizedPhone)) {
+    throw new ValidationError('Enter a valid 10-digit Indian mobile number');
+  }
+
+  // 4. Check if vendor with this phone already exists
+  const existingVendorByPhone = await prisma.vendor.findFirst({ where: { phone: normalizedPhone } });
+  if (existingVendorByPhone) {
+    throw new ConflictError('A vendor with this phone number already exists.');
+  }
+
+  // 5. Check if customer exists and whether they already have a vendor profile
+  let customer = await prisma.customer.findUnique({ where: { phone: normalizedPhone } });
+  if (customer) {
+    const existingVendorByCustomer = await prisma.vendor.findUnique({ where: { customerId: customer.id } });
+    if (existingVendorByCustomer) {
+      throw new ConflictError('A vendor profile is already associated with this customer phone number.');
+    }
+  } else {
+    customer = await prisma.customer.create({
+      data: {
+        phone: normalizedPhone,
+        wallet: { create: {} },
+      }
+    });
   }
 
   const tempPassword = Math.random().toString(36).slice(-8) + 'V@1';
@@ -18,17 +55,9 @@ export async function createVendor(data: { shopName: string, email: string, phon
     slug = `${baseSlug}-${counter++}`;
   }
 
-  const vendorCode = `VND-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-
-  const normalizedPhone = data.phone.replace(/\D/g, '').slice(-10);
-  let customer = await prisma.customer.findUnique({ where: { phone: normalizedPhone } });
-  if (!customer) {
-    customer = await prisma.customer.create({
-      data: {
-        phone: normalizedPhone,
-        wallet: { create: {} },
-      }
-    });
+  let vendorCode = `VND-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  while (await prisma.vendor.findUnique({ where: { code: vendorCode } })) {
+    vendorCode = `VND-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
   }
 
   const vendor = await prisma.vendor.create({
