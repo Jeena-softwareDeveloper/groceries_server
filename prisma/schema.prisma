@@ -152,13 +152,32 @@ model Staff {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  district        District? @relation(fields: [districtId], references: [id])
-  area            Area?     @relation(fields: [areaId], references: [id])
-  referredVendors Vendor[]  @relation("StaffReferredVendors")
+  district          District?        @relation(fields: [districtId], references: [id])
+  area              Area?            @relation(fields: [areaId], references: [id])
+  referredVendors   Vendor[]         @relation("StaffReferredVendors")
+  referredCustomers Customer[]       @relation("StaffReferredCustomers")
+  auditLogs         StaffAuditLog[]
 
   @@index([districtId])
   @@index([areaId])
   @@index([code])
+}
+
+model StaffAuditLog {
+  id         String   @id @default(cuid())
+  staffId    String
+  action     String   // QR_SCAN | LINK_CLICK | APP_INSTALL | VENDOR_ONBOARDED | CUSTOMER_ONBOARDED
+  platform   String?  // Android | iOS | Web | Desktop
+  deviceInfo String?  // Browser or device info
+  ipAddress  String?
+  metadata   String?  // JSON payload
+  createdAt  DateTime @default(now())
+
+  staff      Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@index([staffId])
+  @@index([action])
+  @@index([createdAt])
 }
 
 // ─── Categories ────────────────────────────────────────────────────────────────
@@ -290,18 +309,23 @@ model Customer {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  addresses      Address[]
-  cartItems      CartItem[]
-  wishlists      Wishlist[]
-  orders         Order[]
-  reviews        Review[]
-  notifications  Notification[]
-  wallet         Wallet?
-  coupons        CustomerCoupon[]
-  searchLogs     SearchLog[]
-  supportTickets SupportTicket[]
-  vendorRequests VendorRequest[]
+  addresses       Address[]
+  cartItems       CartItem[]
+  wishlists       Wishlist[]
+  orders          Order[]
+  reviews         Review[]
+  notifications   Notification[]
+  wallet          Wallet?
+  coupons         CustomerCoupon[]
+  searchLogs      SearchLog[]
+  supportTickets  SupportTicket[]
+  vendorRequests  VendorRequest[]
   deviceLocations DeviceLocation[]
+
+  staffId         String?
+  referredByStaff Staff?           @relation("StaffReferredCustomers", fields: [staffId], references: [id])
+
+  @@index([staffId])
 }
 
 model DeviceLocation {

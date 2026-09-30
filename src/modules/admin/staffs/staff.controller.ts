@@ -69,3 +69,14 @@ export async function toggleStatus(req: Request, res: Response, next: NextFuncti
     next(e);
   }
 }
+
+export async function recordAudit(req: Request, res: Response, next: NextFunction) {
+  try {
+    const staffId = paramId(req);
+    const result = await service.recordStaffAudit(staffId, req.body);
+    sendSuccess(res, result, 201);
+  } catch (e) {
+    next(e);
+  }
+}
+

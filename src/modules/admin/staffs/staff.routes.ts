@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { list, get, create, update, remove, toggleStatus } from './staff.controller.js';
+import { list, get, create, update, remove, toggleStatus, recordAudit } from './staff.controller.js';
 
 export const staffAdminRoutes = Router();
 
@@ -9,3 +9,5 @@ staffAdminRoutes.get('/:id', get);
 staffAdminRoutes.put('/:id', update);
 staffAdminRoutes.delete('/:id', remove);
 staffAdminRoutes.patch('/:id/toggle-status', toggleStatus);
+staffAdminRoutes.post('/:id/audit', recordAudit);
+
