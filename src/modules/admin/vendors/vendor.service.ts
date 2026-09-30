@@ -2,8 +2,7 @@ import { prisma } from '../../../lib/prisma.js';
 import { NotFoundError, ConflictError, ValidationError } from '../../../utils/errors.js';
 import bcrypt from 'bcryptjs';
 
-export async function createVendor(data: { shopName: string, email: string, phone: string, address: string, areaId: string, districtId: string }, adminId: string) {
-  // 1. Check if vendor with this email already exists
+export async function createVendor(data: { shopName: string, email: string, phone: string, address: string, areaId: string, districtId: string, staffReferralCode?: string }, adminId: string) {
   const existingVendorByEmail = await prisma.vendor.findUnique({ where: { email: data.email } });
   if (existingVendorByEmail) {
     throw new ConflictError('A vendor with this email already exists.');
@@ -29,7 +28,6 @@ export async function createVendor(data: { shopName: string, email: string, phon
     throw new ConflictError('A vendor with this phone number already exists.');
   }
 
-  // 5. Check if customer exists and whether they already have a vendor profile
   let customer = await prisma.customer.findUnique({ where: { phone: normalizedPhone } });
   if (customer) {
     const existingVendorByCustomer = await prisma.vendor.findUnique({ where: { customerId: customer.id } });
@@ -67,6 +65,19 @@ export async function createVendor(data: { shopName: string, email: string, phon
     vendorCode = `VND-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
   }
 
+  let linkedStaffId: string | null = null;
+  if (data.staffReferralCode && data.staffReferralCode.trim()) {
+    const staff = await prisma.staff.findFirst({
+      where: {
+        OR: [
+          { code: data.staffReferralCode.trim().toUpperCase() },
+          { name: data.staffReferralCode.trim() },
+        ]
+      }
+    });
+    if (staff) linkedStaffId = staff.id;
+  }
+
   const vendor = await prisma.vendor.create({
     data: {
       ...data,
@@ -78,6 +89,8 @@ export async function createVendor(data: { shopName: string, email: string, phon
       approvedAt: new Date(),
       approvedBy: adminId,
       customerId: customer.id,
+      staffReferralCode: data.staffReferralCode || null,
+      staffId: linkedStaffId,
     }
   });
 
@@ -98,6 +111,7 @@ export async function createVendor(data: { shopName: string, email: string, phon
         address: data.address,
         districtId: data.districtId,
         areaId: data.areaId,
+        staffReferralCode: data.staffReferralCode || existingRequest.staffReferralCode || null,
         reviewedBy: adminId,
         reviewedAt: new Date(),
         submittedAt: existingRequest.submittedAt || new Date(),
@@ -114,6 +128,7 @@ export async function createVendor(data: { shopName: string, email: string, phon
         address: data.address,
         districtId: data.districtId,
         areaId: data.areaId,
+        staffReferralCode: data.staffReferralCode || null,
         reviewedBy: adminId,
         reviewedAt: new Date(),
         submittedAt: new Date(),
@@ -134,6 +149,7 @@ export async function listVendors(status?: string, page = 1, limit = 20) {
       orderBy: { createdAt: 'desc' },
       include: { 
         area: { include: { district: true } },
+        referredByStaff: { select: { id: true, name: true, code: true } },
         _count: { select: { products: true } },
         orders: { where: { status: { notIn: ['CANCELLED', 'RETURNED'] } }, select: { grandTotal: true } }
       },
@@ -185,6 +201,7 @@ export async function updateVendor(id: string, data: any) {
     'bankAccountNo', 'bankIfsc', 'logoUrl', 'bannerUrl',
     'fssaiDocUrl', 'gstDocUrl',
     'latitude', 'longitude', 'isOpen', 'operatingHours',
+    'staffReferralCode',
   ];
 
   

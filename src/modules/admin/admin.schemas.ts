@@ -42,4 +42,5 @@ export const createVendorSchema = z.object({
   address: z.string().min(5, 'Address is required').transform(sanitize),
   areaId: z.string().min(1, 'Area is required'),
   districtId: z.string().min(1, 'District is required'),
+  staffReferralCode: z.string().optional().nullable().transform(v => v ? sanitize(v) : undefined),
 });

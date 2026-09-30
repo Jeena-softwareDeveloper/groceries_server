@@ -11,6 +11,7 @@ import { vendorRequestAdminRoutes } from '../vendor-request/vendor-request.admin
 import { productApprovalAdminRoutes, offerApprovalAdminRoutes } from './product-approvals/product-approval.routes.js';
 import { settlementAdminRoutes } from './settlements/settlement.routes.js';
 import { auditAdminRoutes } from './audit/audit.routes.js';
+import { staffAdminRoutes } from './staffs/staff.routes.js';
 
 import { dashboardRoutes } from './dashboard/dashboard.routes.js';
 
@@ -24,6 +25,7 @@ adminRoutes.use('/areas', areaRoutes);
 adminRoutes.use('/categories', categoryRoutes);
 adminRoutes.use('/subcategories', categoryRoutes);
 adminRoutes.use('/vendors', vendorAdminRoutes);
+adminRoutes.use('/staffs', staffAdminRoutes);
 adminRoutes.use('/settings', settingsRoutes);
 adminRoutes.use('/', marketingRoutes);
 adminRoutes.use('/analytics', analyticsRoutes);

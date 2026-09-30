@@ -32,6 +32,7 @@ export async function getMyRequest(customerId: string) {
             areaId: approvedVendor.areaId,
             reviewedAt: approvedVendor.approvedAt || new Date(),
             reviewedBy: approvedVendor.approvedBy,
+            staffReferralCode: approvedVendor.staffReferralCode || null,
           },
           include: { district: { select: { id: true, name: true } }, area: { select: { id: true, name: true } } }
         });
@@ -49,6 +50,7 @@ export async function getMyRequest(customerId: string) {
             submittedAt: approvedVendor.createdAt,
             reviewedAt: approvedVendor.approvedAt || new Date(),
             reviewedBy: approvedVendor.approvedBy,
+            staffReferralCode: approvedVendor.staffReferralCode || null,
           },
           include: { district: { select: { id: true, name: true } }, area: { select: { id: true, name: true } } }
         });

@@ -26,6 +26,7 @@ model District {
   deliveryCharges  DeliveryChargeRule[]
   offers           Offer[]
   vendorRequests   VendorRequest[]
+  staffs           Staff[]
 }
 
 model Area {
@@ -42,6 +43,7 @@ model Area {
   district       District        @relation(fields: [districtId], references: [id], onDelete: Cascade)
   vendors        Vendor[]
   vendorRequests VendorRequest[]
+  staffs         Staff[]
 
   @@index([districtId])
 }
@@ -95,8 +97,11 @@ model Vendor {
   ratingCount     Int          @default(0)
   approvedAt      DateTime?
   approvedBy      String?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  staffReferralCode String?
+  staffId           String?
+  referredByStaff   Staff?        @relation("StaffReferredVendors", fields: [staffId], references: [id], onDelete: SetNull)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
   area         Area          @relation(fields: [areaId], references: [id])
   district     District      @relation(fields: [districtId], references: [id])
@@ -130,6 +135,30 @@ model VendorStaff {
   vendor Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
 
   @@index([vendorId])
+}
+
+// ─── Platform Marketing / Referral Staff ───────────────────────────────────────
+
+model Staff {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  phone       String   @unique
+  email       String?
+  designation String?
+  districtId  String?
+  areaId      String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  district        District? @relation(fields: [districtId], references: [id])
+  area            Area?     @relation(fields: [areaId], references: [id])
+  referredVendors Vendor[]  @relation("StaffReferredVendors")
+
+  @@index([districtId])
+  @@index([areaId])
+  @@index([code])
 }
 
 // ─── Categories ────────────────────────────────────────────────────────────────
@@ -713,6 +742,7 @@ model VendorRequest {
   reviewedBy        String?
   reviewedAt        DateTime?
   submittedAt       DateTime?
+  staffReferralCode String?
 
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
