@@ -36,10 +36,17 @@ export async function createVendor(data: { shopName: string, email: string, phon
     if (existingVendorByCustomer) {
       throw new ConflictError('A vendor profile is already associated with this customer phone number.');
     }
+    if (!customer.name) {
+      customer = await prisma.customer.update({
+        where: { id: customer.id },
+        data: { name: data.shopName },
+      });
+    }
   } else {
     customer = await prisma.customer.create({
       data: {
         phone: normalizedPhone,
+        name: data.shopName,
         wallet: { create: {} },
       }
     });
@@ -73,6 +80,46 @@ export async function createVendor(data: { shopName: string, email: string, phon
       customerId: customer.id,
     }
   });
+
+  // Ensure linked VendorRequest exists and is marked APPROVED for the mobile app
+  const existingRequest = await prisma.vendorRequest.findFirst({
+    where: { customerId: customer.id },
+    orderBy: { createdAt: 'desc' }
+  });
+
+  if (existingRequest) {
+    await prisma.vendorRequest.update({
+      where: { id: existingRequest.id },
+      data: {
+        status: 'APPROVED',
+        shopName: data.shopName,
+        mobileNumber: normalizedPhone,
+        email: data.email,
+        address: data.address,
+        districtId: data.districtId,
+        areaId: data.areaId,
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        submittedAt: existingRequest.submittedAt || new Date(),
+      }
+    });
+  } else {
+    await prisma.vendorRequest.create({
+      data: {
+        customerId: customer.id,
+        status: 'APPROVED',
+        shopName: data.shopName,
+        mobileNumber: normalizedPhone,
+        email: data.email,
+        address: data.address,
+        districtId: data.districtId,
+        areaId: data.areaId,
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        submittedAt: new Date(),
+      }
+    });
+  }
 
   return { vendor, tempPassword };
 }

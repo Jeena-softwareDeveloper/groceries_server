@@ -322,7 +322,9 @@ export async function getMe(userId: string, role: UserRole) {
       return {
         id: vendor.id,
         email: vendor.email,
+        name: vendor.shopName,
         shopName: vendor.shopName,
+        phone: vendor.phone,
         status: vendor.status,
         role: 'VENDOR' as const,
         createdAt: vendor.createdAt,

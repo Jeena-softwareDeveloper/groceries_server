@@ -5,11 +5,58 @@ import bcrypt from 'bcryptjs';
 type VendorRequestStatus = 'DRAFT' | 'PENDING' | 'MORE_INFO_REQUIRED' | 'APPROVED' | 'REJECTED';
 
 export async function getMyRequest(customerId: string) {
-  return prisma.vendorRequest.findFirst({
+  let req = await prisma.vendorRequest.findFirst({
     where: { customerId },
     orderBy: { createdAt: 'desc' },
     include: { district: { select: { id: true, name: true } }, area: { select: { id: true, name: true } } },
   });
+
+  // If request is not approved or doesn't exist, check if customer is linked to an approved vendor
+  if (!req || req.status !== 'APPROVED') {
+    const approvedVendor = await prisma.vendor.findFirst({
+      where: { customerId, status: 'APPROVED' },
+      include: { district: { select: { id: true, name: true } }, area: { select: { id: true, name: true } } }
+    });
+
+    if (approvedVendor) {
+      if (req) {
+        req = await prisma.vendorRequest.update({
+          where: { id: req.id },
+          data: {
+            status: 'APPROVED',
+            shopName: approvedVendor.shopName,
+            mobileNumber: approvedVendor.phone,
+            email: approvedVendor.email,
+            address: approvedVendor.address,
+            districtId: approvedVendor.districtId,
+            areaId: approvedVendor.areaId,
+            reviewedAt: approvedVendor.approvedAt || new Date(),
+            reviewedBy: approvedVendor.approvedBy,
+          },
+          include: { district: { select: { id: true, name: true } }, area: { select: { id: true, name: true } } }
+        });
+      } else {
+        req = await prisma.vendorRequest.create({
+          data: {
+            customerId,
+            status: 'APPROVED',
+            shopName: approvedVendor.shopName,
+            mobileNumber: approvedVendor.phone,
+            email: approvedVendor.email,
+            address: approvedVendor.address,
+            districtId: approvedVendor.districtId,
+            areaId: approvedVendor.areaId,
+            submittedAt: approvedVendor.createdAt,
+            reviewedAt: approvedVendor.approvedAt || new Date(),
+            reviewedBy: approvedVendor.approvedBy,
+          },
+          include: { district: { select: { id: true, name: true } }, area: { select: { id: true, name: true } } }
+        });
+      }
+    }
+  }
+
+  return req;
 }
 
 export async function upsertDraft(customerId: string, data: Record<string, unknown>) {
