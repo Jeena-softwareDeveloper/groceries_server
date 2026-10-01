@@ -79,7 +79,7 @@ customerRoutes.get('/app/version', async (_req, res, next) => {
     const settings = await getSettings();
     sendSuccess(res, {
       minVersion: (settings['minAppVersion'] as string) ?? '0.1.0',
-      playStoreUrl: (settings['playStoreUrl'] as string) ?? 'https://play.google.com/store/apps/details?id=com.alltimemarket.app',
+      playStoreUrl: (settings['playStoreUrl'] as string) ?? '',
     });
   } catch (e) { next(e); }
 });

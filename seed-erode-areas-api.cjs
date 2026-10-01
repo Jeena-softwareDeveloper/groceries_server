@@ -2,7 +2,7 @@
  * API Seeder for Erode Local Areas
  * This script seeds all local areas in Erode via the Admin API.
  * Usage:
- *   node seed-erode-areas-api.cjs                (defaults to remote API: https://atmapi.ponnilamfincorp.com)
+ *   node seed-erode-areas-api.cjs                (defaults to remote API: https://api.alltimemarket.in)
  *   node seed-erode-areas-api.cjs http://localhost:3000   (for local server)
  */
 
@@ -53,7 +53,7 @@ const ERODE_AREAS = [
 ];
 
 async function run() {
-  const targetUrl = process.argv[2] || 'https://atmapi.ponnilamfincorp.com';
+  const targetUrl = process.argv[2] || 'https://api.alltimemarket.in';
   console.log(`🌐 Target API: ${targetUrl}`);
 
   // 1. Admin login

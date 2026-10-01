@@ -40,7 +40,7 @@ const envSchema = z.object({
   MIN_APP_VERSION: z.string().optional(),
   PLAY_STORE_URL: z.string().optional(),
   // Image hosting
-  IMAGE_BASE_URL: z.string().default('https://atmapi.ponnilamfincorp.com/uploads'),
+  IMAGE_BASE_URL: z.string(),
 });
 
 

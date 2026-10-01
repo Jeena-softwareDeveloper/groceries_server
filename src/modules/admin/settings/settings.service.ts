@@ -7,11 +7,11 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
   deliveryFee: 0,
   isDeliveryKmBased: false,
   deliveryFeePerKm: 10,
-  supportEmail: 'support@districtmart.com',
-  supportPhone: '+910000000000',
+  supportEmail: '',
+  supportPhone: '',
   featureFlags: { wallet: false, cod: true, vendorApprovalRequired: true },
   minAppVersion: '1.0.0',
-  playStoreUrl: 'https://play.google.com/store/apps/details?id=com.alltimemarket.app',
+  playStoreUrl: '',
 };
 
 export async function getSettings() {
