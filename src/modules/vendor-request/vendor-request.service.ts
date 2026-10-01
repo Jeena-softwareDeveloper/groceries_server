@@ -244,6 +244,20 @@ export async function approveRequest(id: string, adminId: string) {
 
   const vendorCode = `VND-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
+  // Resolve staffReferralCode → staffId FK
+  let resolvedStaffId: string | null = null;
+  if (req.staffReferralCode) {
+    const foundStaff = await prisma.staff.findFirst({
+      where: {
+        OR: [
+          { code: req.staffReferralCode.trim().toUpperCase() },
+          { name: req.staffReferralCode.trim() },
+        ],
+      },
+    });
+    resolvedStaffId = foundStaff?.id ?? null;
+  }
+
   // Run vendor create + request update atomically so we never get APPROVED request without a vendor record
   const { vendor } = await prisma.$transaction(async (tx) => {
     const createdVendor = await tx.vendor.create({
@@ -275,12 +289,19 @@ export async function approveRequest(id: string, adminId: string) {
         status: 'APPROVED',
         approvedAt: new Date(),
         approvedBy: adminId,
+        staffReferralCode: req.staffReferralCode || null,
+        staffId: resolvedStaffId,
       },
     });
 
     await tx.vendorRequest.update({
       where: { id },
-      data: { status: 'APPROVED', reviewedBy: adminId, reviewedAt: new Date() },
+      data: {
+        status: 'APPROVED',
+        reviewedBy: adminId,
+        reviewedAt: new Date(),
+        staffId: resolvedStaffId, // store resolved FK
+      },
     });
 
     return { vendor: createdVendor };

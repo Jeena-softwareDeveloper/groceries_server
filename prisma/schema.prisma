@@ -107,14 +107,17 @@ model Vendor {
   district     District      @relation(fields: [districtId], references: [id])
   districtId   String
   customerId   String?       @unique
-  staff        VendorStaff[]
-  products     Product[]
-  orders       Order[]
-  cartItems    CartItem[]
-  offers       Offer[]
-  coupons      Coupon[]
-  reviews      Review[]
-  notifications Notification[]
+  staff              VendorStaff[]
+  products           Product[]
+  orders             Order[]
+  cartItems          CartItem[]
+  offers             Offer[]
+  coupons            Coupon[]
+  reviews            Review[]
+  notifications      Notification[]
+  settlement         VendorSettlement?
+  wallet             VendorWallet?
+  walletTransactions VendorWalletTransaction[]
 
   @@index([areaId])
   @@index([districtId])
@@ -157,6 +160,7 @@ model Staff {
   referredVendors   Vendor[]         @relation("StaffReferredVendors")
   referredCustomers Customer[]       @relation("StaffReferredCustomers")
   auditLogs         StaffAuditLog[]
+  vendorRequests    VendorRequest[]
 
   @@index([districtId])
   @@index([areaId])
@@ -313,6 +317,7 @@ model Customer {
   cartItems       CartItem[]
   wishlists       Wishlist[]
   orders          Order[]
+  payments        Payment[]
   reviews         Review[]
   notifications   Notification[]
   wallet          Wallet?
@@ -415,7 +420,8 @@ model Payment {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
-  orders Order[]
+  customer Customer @relation(fields: [customerId], references: [id])
+  orders   Order[]
 
   @@index([customerId])
 }
@@ -763,10 +769,11 @@ model VendorRequest {
   // Admin review fields
   adminRemarks      String?
   rejectionReason   String?
-  reviewedBy        String?
+  reviewedBy        String?  // SuperAdmin ID who reviewed
   reviewedAt        DateTime?
   submittedAt       DateTime?
-  staffReferralCode String?
+  staffReferralCode String?  // raw code string (kept for legacy display)
+  staffId           String?  // FK to Staff — set when referral code is resolved
 
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
@@ -774,9 +781,11 @@ model VendorRequest {
   customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
   district   District? @relation(fields: [districtId], references: [id])
   area       Area?     @relation(fields: [areaId], references: [id])
+  staff      Staff?    @relation(fields: [staffId], references: [id], onDelete: SetNull)
 
   @@index([customerId])
   @@index([status])
+  @@index([staffId])
 }
 
 model OtpSession {
@@ -830,7 +839,7 @@ model AuditLog {
 
 model VendorSettlement {
   id               String   @id @default(cuid())
-  vendorId         String
+  vendorId         String   @unique
   settlementNo     String   @unique
   periodStart      DateTime
   periodEnd        DateTime
@@ -843,12 +852,13 @@ model VendorSettlement {
   status           String   @default("PENDING") // PENDING | APPROVED | REJECTED | PAID
   bankReference    String?
   rejectionReason  String?
-  approvedBy       String?
+  approvedBy       String?  // SuperAdmin ID
   approvedAt       DateTime?
   paidAt           DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
+  vendor       Vendor                    @relation(fields: [vendorId], references: [id])
   orders       Order[]
   transactions VendorWalletTransaction[]
 
@@ -863,6 +873,8 @@ model VendorWallet {
   balance     Decimal  @default(0)
   totalEarned Decimal  @default(0)
   updatedAt   DateTime @updatedAt
+
+  vendor Vendor @relation(fields: [vendorId], references: [id], onDelete: Cascade)
 }
 
 model VendorWalletTransaction {
@@ -876,6 +888,7 @@ model VendorWalletTransaction {
   reference    String?
   createdAt    DateTime          @default(now())
 
+  vendor     Vendor            @relation(fields: [vendorId], references: [id])
   settlement VendorSettlement? @relation(fields: [settlementId], references: [id])
 
   @@index([vendorId])
