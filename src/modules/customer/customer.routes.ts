@@ -125,7 +125,7 @@ customerRoutes.get('/refer-link', async (req, res, next) => {
     
     const { getSettings } = await import('../admin/settings/settings.service.js');
     const settings = await getSettings();
-    const playStoreUrl = (settings['playStoreUrl'] as string) || 'https://play.google.com/store/apps/details?id=com.districtmart.app';
+    const playStoreUrl = (settings['playStoreUrl'] as string) || 'https://play.google.com/store/apps/details?id=com.alltimemarket.app';
     
     sendSuccess(res, { playStoreUrl });
   } catch (e) { next(e); }
@@ -151,7 +151,7 @@ customerRoutes.get('/refer', async (req, res, next) => {
     // Redirect to play store
     const { getSettings } = await import('../admin/settings/settings.service.js');
     const settings = await getSettings();
-    const playStoreUrl = (settings['playStoreUrl'] as string) || 'https://play.google.com/store/apps/details?id=com.districtmart.app';
+    const playStoreUrl = (settings['playStoreUrl'] as string) || 'https://play.google.com/store/apps/details?id=com.alltimemarket.app';
     
     res.redirect(playStoreUrl);
   } catch (e) { next(e); }
