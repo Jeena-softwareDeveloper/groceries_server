@@ -10,7 +10,7 @@ const DEFAULT_SETTINGS: Record<string, unknown> = {
   supportEmail: '',
   supportPhone: '',
   featureFlags: { wallet: false, cod: true, vendorApprovalRequired: true },
-  minAppVersion: '1.0.0',
+  minAppVersion: '0.1.0',
   playStoreUrl: '',
 };
 
