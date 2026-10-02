@@ -112,7 +112,7 @@ export async function requestCustomerOtp(
   };
 }
 
-export async function verifyCustomerOtp(phone: string, otp: string, deviceName?: string, ipAddress?: string, deviceId?: string, deviceModel?: string, osVersion?: string) {
+export async function verifyCustomerOtp(phone: string, otp: string, deviceName?: string, ipAddress?: string, deviceId?: string, deviceModel?: string, osVersion?: string, staffReferralCode?: string) {
   const normalized = assertValidPhone(phone);
 
   if (!/^\d{6}$/.test(otp)) {
@@ -145,12 +145,28 @@ export async function verifyCustomerOtp(phone: string, otp: string, deviceName?:
   let isNewUser = false;
   if (!customer) {
     isNewUser = true;
+
+    // Resolve staff referral code to a staffId if provided
+    let staffId: string | undefined;
+    if (staffReferralCode) {
+      const staff = await prisma.staff.findUnique({ where: { code: staffReferralCode.toUpperCase() } });
+      if (staff) staffId = staff.id;
+    }
+
     customer = await prisma.customer.create({
       data: {
         phone: normalized,
         wallet: { create: {} },
+        ...(staffId ? { staffId, staffReferralCode: staffReferralCode!.toUpperCase() } : {}),
       },
     });
+
+    // Log a CUSTOMER_ONBOARDED audit event for the referring staff
+    if (staffId) {
+      await prisma.staffAuditLog.create({
+        data: { staffId, action: 'CUSTOMER_ONBOARDED', platform: 'App' }
+      }).catch(() => {}); // non-critical
+    }
   }
 
   if (customer.isBlocked) throw new ForbiddenError('This account is suspended. Please contact support.');

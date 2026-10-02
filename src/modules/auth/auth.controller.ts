@@ -20,6 +20,7 @@ const otpVerifySchema = z.object({
   deviceId: z.string().optional(),
   deviceModel: z.string().optional(),
   osVersion: z.string().optional(),
+  staffReferralCode: z.string().optional(),
 });
 const loginSchema = z.object({ email: z.string().email(), password: z.string().min(6), deviceId: z.string().optional(), deviceModel: z.string().optional(), osVersion: z.string().optional() });
 const refreshSchema = z.object({ refreshToken: z.string().min(1) });
@@ -38,9 +39,9 @@ export async function customerOtpRequest(req: Request, res: Response, next: Next
 
 export async function customerOtpVerify(req: Request, res: Response, next: NextFunction) {
   try {
-    const { phone, otp, deviceId, deviceModel, osVersion } = otpVerifySchema.parse(req.body);
+    const { phone, otp, deviceId, deviceModel, osVersion, staffReferralCode } = otpVerifySchema.parse(req.body);
     const deviceName = req.headers['user-agent'];
-    const tokens = await authService.verifyCustomerOtp(phone, otp, deviceName, req.ip, deviceId, deviceModel, osVersion);
+    const tokens = await authService.verifyCustomerOtp(phone, otp, deviceName, req.ip, deviceId, deviceModel, osVersion, staffReferralCode);
     sendSuccess(res, tokens);
   } catch (err) {
     next(err);
