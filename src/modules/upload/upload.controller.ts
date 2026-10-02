@@ -3,6 +3,7 @@ import { sendError, sendSuccess } from '../../utils/response.js';
 import { uploadToFTP } from '../../lib/ftp.js';
 import crypto from 'crypto';
 import path from 'path';
+import fs from 'fs';
 import * as ftp from 'basic-ftp';
 import { env } from '../../config/env.js';
 import sharp from 'sharp';
@@ -51,6 +52,21 @@ export async function getFileFromFTP(req: Request, res: Response): Promise<void>
     return;
   }
 
+  const ext = path.extname(filePath);
+  const localCachePath = path.join(process.cwd(), 'uploads_cache', filePath.replace(/\//g, '_'));
+  
+  if (ext) res.type(ext);
+
+  try {
+    // 1. Try to serve from local disk cache first
+    await fs.promises.access(localCachePath);
+    const readStream = fs.createReadStream(localCachePath);
+    readStream.pipe(res);
+    return;
+  } catch {
+    // File not in cache, proceed to FTP
+  }
+
   const client = new ftp.Client();
   try {
     await client.access({
@@ -60,13 +76,15 @@ export async function getFileFromFTP(req: Request, res: Response): Promise<void>
       secure: false
     });
 
-    const ext = path.extname(filePath);
-    if (ext) {
-      res.type(ext);
-    }
+    // Ensure cache directory exists
+    await fs.promises.mkdir(path.dirname(localCachePath), { recursive: true });
+
+    // Download to local cache file first
+    await client.downloadTo(localCachePath, filePath);
     
-    // Pipe the FTP download stream directly to the HTTP response
-    await client.downloadTo(res, filePath);
+    // Serve from cache file
+    const readStream = fs.createReadStream(localCachePath);
+    readStream.pipe(res);
   } catch (error) {
     console.error(`FTP Proxy Error for ${filePath}:`, error);
     if (!res.headersSent) {
