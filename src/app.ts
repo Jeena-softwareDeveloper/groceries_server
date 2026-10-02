@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -38,6 +38,9 @@ export function createApp() {
           return callback(null, true);
         }
         if (/\.vercel\.app\/?$/.test(origin) || /^https:\/\/groceries-admin-xi\.vercel\.app\/?$/.test(origin)) {
+          return callback(null, true);
+        }
+        if (/^https?:\/\/(?:[a-zA-Z0-9-]+\.)*alltimemarket\.in\/?$/.test(origin)) {
           return callback(null, true);
         }
         callback(new Error('Not allowed by CORS'));
