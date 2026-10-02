@@ -106,6 +106,31 @@ customerRoutes.get('/shops', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+customerRoutes.get('/refer-link', async (req, res, next) => {
+  try {
+    const ref = req.query.ref as string;
+    if (ref) {
+      // Log the scan if the staff code is valid
+      const staff = await prisma.staff.findUnique({ where: { code: ref } });
+      if (staff) {
+        await prisma.staffAuditLog.create({
+          data: {
+            staffId: staff.id,
+            action: 'QR_SCAN',
+            platform: req.headers['user-agent'] || 'Unknown'
+          }
+        });
+      }
+    }
+    
+    const { getSettings } = await import('../admin/settings/settings.service.js');
+    const settings = await getSettings();
+    const playStoreUrl = (settings['playStoreUrl'] as string) || 'https://play.google.com/store/apps/details?id=com.districtmart.app';
+    
+    sendSuccess(res, { playStoreUrl });
+  } catch (e) { next(e); }
+});
+
 customerRoutes.get('/refer', async (req, res, next) => {
   try {
     const ref = req.query.ref as string;
