@@ -131,6 +131,27 @@ customerRoutes.get('/refer-link', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+customerRoutes.post('/refer-install', async (req, res, next) => {
+  try {
+    const { ref } = req.body;
+    if (ref) {
+      const staff = await prisma.staff.findUnique({ where: { code: ref } });
+      if (staff) {
+        // Prevent duplicate installs by checking if it was already logged for this device/platform today?
+        // Let's just log it for now
+        await prisma.staffAuditLog.create({
+          data: {
+            staffId: staff.id,
+            action: 'APP_INSTALL',
+            platform: req.headers['user-agent'] || 'App'
+          }
+        });
+      }
+    }
+    sendSuccess(res, { success: true });
+  } catch (e) { next(e); }
+});
+
 customerRoutes.get('/refer', async (req, res, next) => {
   try {
     const ref = req.query.ref as string;
