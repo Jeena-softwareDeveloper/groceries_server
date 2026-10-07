@@ -37,6 +37,7 @@ export const adminUpdateProductSchema = z.object({
 
 export const createVendorSchema = z.object({
   shopName: z.string().min(2, 'Shop name is required').transform(sanitize),
+  shopCategory: z.string().optional().nullable().transform(v => v ? sanitize(v) : undefined),
   email: z.string().email('Invalid email address').transform(sanitize),
   phone: z.string().min(10, 'Invalid phone number').transform(sanitize),
   address: z.string().min(5, 'Address is required').transform(sanitize),

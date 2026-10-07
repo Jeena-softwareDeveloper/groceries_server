@@ -2,7 +2,7 @@ import { prisma } from '../../../lib/prisma.js';
 import { NotFoundError, ConflictError, ValidationError } from '../../../utils/errors.js';
 import bcrypt from 'bcryptjs';
 
-export async function createVendor(data: { shopName: string, email: string, phone: string, address: string, areaId: string, districtId: string, staffReferralCode?: string }, adminId: string) {
+export async function createVendor(data: { shopName: string, email: string, phone: string, address: string, areaId: string, districtId: string, staffReferralCode?: string, shopCategory?: string }, adminId: string) {
   const existingVendorByEmail = await prisma.vendor.findUnique({ where: { email: data.email } });
   if (existingVendorByEmail) {
     throw new ConflictError('A vendor with this email already exists.');
@@ -78,9 +78,11 @@ export async function createVendor(data: { shopName: string, email: string, phon
     if (staff) linkedStaffId = staff.id;
   }
 
+  const { shopCategory, ...vendorCreateData } = data;
+
   const vendor = await prisma.vendor.create({
     data: {
-      ...data,
+      ...vendorCreateData,
       phone: normalizedPhone,
       passwordHash,
       slug,
@@ -106,6 +108,7 @@ export async function createVendor(data: { shopName: string, email: string, phon
       data: {
         status: 'APPROVED',
         shopName: data.shopName,
+        shopCategory: shopCategory || existingRequest.shopCategory || null,
         mobileNumber: normalizedPhone,
         email: data.email,
         address: data.address,
@@ -123,6 +126,7 @@ export async function createVendor(data: { shopName: string, email: string, phon
         customerId: customer.id,
         status: 'APPROVED',
         shopName: data.shopName,
+        shopCategory: shopCategory || null,
         mobileNumber: normalizedPhone,
         email: data.email,
         address: data.address,
@@ -136,7 +140,7 @@ export async function createVendor(data: { shopName: string, email: string, phon
     });
   }
 
-  return { vendor, tempPassword };
+  return { vendor: { ...vendor, shopCategory: shopCategory || null }, tempPassword };
 }
 export async function listVendors(status?: string, page = 1, limit = 20) {
   const skip = (page - 1) * limit;
@@ -156,11 +160,30 @@ export async function listVendors(status?: string, page = 1, limit = 20) {
     }),
     prisma.vendor.count({ where }),
   ]);
+
+  const customerIds = items.map((item: any) => item.customerId).filter(Boolean) as string[];
+  const requests = customerIds.length > 0
+    ? await prisma.vendorRequest.findMany({
+        where: { customerId: { in: customerIds } },
+        orderBy: { createdAt: 'desc' },
+        select: { customerId: true, shopCategory: true, ownerName: true },
+      })
+    : [];
+  const reqMap = new Map<string, any>();
+  for (const r of requests) {
+    if (!reqMap.has(r.customerId)) {
+      reqMap.set(r.customerId, r);
+    }
+  }
+
   const mappedItems = items.map((item: any) => {
     const turnover = item.orders.reduce((sum: number, order: any) => sum + Number(order.grandTotal || 0), 0);
     const { orders, _count, ...rest } = item;
+    const req = item.customerId ? reqMap.get(item.customerId) : null;
     return {
       ...rest,
+      shopCategory: req?.shopCategory || null,
+      ownerName: req?.ownerName || null,
       productsCount: _count?.products || 0,
       turnover
     };
@@ -175,11 +198,26 @@ export async function getVendor(id: string) {
     include: { area: { include: { district: true } }, staff: true },
   });
   if (!vendor) throw new NotFoundError('Vendor not found');
-  return vendor;
+
+  let shopCategory = null;
+  let ownerName = null;
+  if (vendor.customerId) {
+    const req = await prisma.vendorRequest.findFirst({
+      where: { customerId: vendor.customerId },
+      orderBy: { createdAt: 'desc' },
+      select: { shopCategory: true, ownerName: true },
+    });
+    if (req) {
+      shopCategory = req.shopCategory;
+      ownerName = req.ownerName;
+    }
+  }
+
+  return { ...vendor, shopCategory, ownerName };
 }
 
 export async function updateVendor(id: string, data: any) {
-  await getVendor(id);
+  const vendor = await getVendor(id);
   
   const fieldMap: Record<string, string> = {
     ownerName: 'ownerName',
@@ -214,10 +252,51 @@ export async function updateVendor(id: string, data: any) {
     }
   }
 
-  return prisma.vendor.update({
+  const updatedVendor = await prisma.vendor.update({
     where: { id },
     data: updateData,
   });
+
+  // Sync category and ownerName with linked VendorRequest & Customer
+  if (vendor.customerId) {
+    if (data.ownerName) {
+      await prisma.customer.update({
+        where: { id: vendor.customerId },
+        data: { name: data.ownerName },
+      }).catch(() => null);
+    }
+    const req = await prisma.vendorRequest.findFirst({
+      where: { customerId: vendor.customerId },
+      orderBy: { createdAt: 'desc' }
+    });
+    if (req) {
+      await prisma.vendorRequest.update({
+        where: { id: req.id },
+        data: {
+          ...(data.shopCategory !== undefined ? { shopCategory: data.shopCategory } : {}),
+          ...(data.ownerName !== undefined ? { ownerName: data.ownerName } : {}),
+          ...(data.shopName !== undefined ? { shopName: data.shopName } : {}),
+        }
+      }).catch(() => null);
+    } else {
+      await prisma.vendorRequest.create({
+        data: {
+          customerId: vendor.customerId,
+          status: 'APPROVED',
+          shopName: data.shopName || vendor.shopName,
+          shopCategory: data.shopCategory || null,
+          ownerName: data.ownerName || null,
+          mobileNumber: data.phone || data.mobileNumber || vendor.phone,
+          email: data.email || vendor.email,
+          address: data.address || vendor.address,
+          districtId: data.districtId || vendor.districtId,
+          areaId: data.areaId || vendor.areaId,
+        }
+      }).catch(() => null);
+    }
+  }
+
+  return { ...updatedVendor, shopCategory: data.shopCategory ?? (vendor as any).shopCategory };
 }
 
 export async function approveVendor(id: string, adminId: string) {
