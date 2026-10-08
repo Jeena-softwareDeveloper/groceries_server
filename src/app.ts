@@ -53,6 +53,14 @@ export function createApp() {
   app.use(requestLogger);
   app.use(globalRateLimiter);
 
+  // Normalize duplicate /api/v1 prefix if client accidentally sent /api/v1/api/v1/...
+  app.use((req, _res, next) => {
+    if (req.url.startsWith('/api/v1/api/v1/')) {
+      req.url = req.url.replace(/^\/api\/v1\/api\/v1\//, '/api/v1/');
+    }
+    next();
+  });
+
   app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
   app.use('/api/v1/health', healthRoutes);
   app.use('/api/v1/auth', authRoutes);

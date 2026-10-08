@@ -45,6 +45,53 @@ export async function uploadFile(req: Request, res: Response): Promise<void> {
   }
 }
 
+// Limit concurrent FTP downloads to avoid FTP 421 "Too many connections (10) from this IP"
+let activeFtpConnections = 0;
+const MAX_CONCURRENT_FTP = 3;
+const ftpQueue: Array<() => void> = [];
+const pendingDownloads = new Map<string, Promise<void>>();
+
+function acquireFtpSlot(): Promise<void> {
+  return new Promise((resolve) => {
+    if (activeFtpConnections < MAX_CONCURRENT_FTP) {
+      activeFtpConnections++;
+      resolve();
+    } else {
+      ftpQueue.push(() => {
+        activeFtpConnections++;
+        resolve();
+      });
+    }
+  });
+}
+
+function releaseFtpSlot(): void {
+  activeFtpConnections--;
+  if (ftpQueue.length > 0) {
+    const next = ftpQueue.shift();
+    if (next) next();
+  }
+}
+
+async function downloadFromFtpToCache(filePath: string, localCachePath: string): Promise<void> {
+  await acquireFtpSlot();
+  const client = new ftp.Client();
+  try {
+    await client.access({
+      host: env.FTP_HOST,
+      user: env.FTP_USER,
+      password: env.FTP_PASSWORD,
+      secure: false,
+    });
+
+    await fs.promises.mkdir(path.dirname(localCachePath), { recursive: true });
+    await client.downloadTo(localCachePath, filePath);
+  } finally {
+    client.close();
+    releaseFtpSlot();
+  }
+}
+
 export async function getFileFromFTP(req: Request, res: Response): Promise<void> {
   const filePath = req.params[0]; // Gets the wildcard path after /uploads/
   if (!filePath) {
@@ -67,22 +114,18 @@ export async function getFileFromFTP(req: Request, res: Response): Promise<void>
     // File not in cache, proceed to FTP
   }
 
-  const client = new ftp.Client();
   try {
-    await client.access({
-      host: env.FTP_HOST,
-      user: env.FTP_USER,
-      password: env.FTP_PASSWORD,
-      secure: false
-    });
+    // Deduplicate concurrent requests for the exact same file
+    let downloadPromise = pendingDownloads.get(filePath);
+    if (!downloadPromise) {
+      downloadPromise = downloadFromFtpToCache(filePath, localCachePath).finally(() => {
+        pendingDownloads.delete(filePath);
+      });
+      pendingDownloads.set(filePath, downloadPromise);
+    }
 
-    // Ensure cache directory exists
-    await fs.promises.mkdir(path.dirname(localCachePath), { recursive: true });
+    await downloadPromise;
 
-    // Download to local cache file first
-    await client.downloadTo(localCachePath, filePath);
-    
-    // Serve from cache file
     const readStream = fs.createReadStream(localCachePath);
     readStream.pipe(res);
   } catch (error) {
@@ -90,7 +133,5 @@ export async function getFileFromFTP(req: Request, res: Response): Promise<void>
     if (!res.headersSent) {
       res.status(404).send('File not found or error connecting to FTP');
     }
-  } finally {
-    client.close();
   }
 }
