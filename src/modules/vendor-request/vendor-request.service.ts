@@ -268,6 +268,7 @@ export async function approveRequest(id: string, adminId: string) {
         email: vendorEmail,
         passwordHash,
         shopName: req.shopName ?? 'My Shop',
+        shopCategory: req.shopCategory ?? null,
         code: vendorCode,
         slug,
         description: req.description,

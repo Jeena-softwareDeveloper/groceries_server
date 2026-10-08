@@ -402,27 +402,67 @@ export async function listShops(districtIdInput?: string, areaId?: string, categ
       ? undefined
       : await resolveDistrictId(districtIdInput);
 
-  const allVendors = await prisma.vendor.findMany({
+  let categoryCondition: any = {};
+  if (categoryId) {
+    const category = await prisma.category.findUnique({
+      where: { id: categoryId },
+      include: { children: { select: { id: true, name: true, slug: true } } },
+    });
+
+    if (category) {
+      const children = category.children || [];
+      const allCatIds = [category.id, ...children.map((c) => c.id)];
+      const allCatNames = [category.name, ...children.map((c) => c.name)].filter(Boolean);
+      const allCatSlugs = [category.slug, ...children.map((c) => c.slug)].filter(Boolean);
+
+      categoryCondition = {
+        OR: [
+          // 1. Vendor has published products in this category or child subcategories
+          { products: { some: { categoryId: { in: allCatIds }, status: 'PUBLISHED', isActive: true } } },
+          // 2. Vendor has this category configured as shopCategory (name or slug)
+          { shopCategory: { in: allCatNames } },
+          { shopCategory: { in: allCatSlugs } },
+          // 3. Newly added vendors with no published products and no specific category assigned
+          {
+            AND: [
+              { OR: [{ shopCategory: null }, { shopCategory: '' }] },
+              { products: { none: { status: 'PUBLISHED', isActive: true } } },
+            ],
+          },
+        ],
+      };
+    } else {
+      categoryCondition = {
+        OR: [
+          { products: { some: { categoryId, status: 'PUBLISHED', isActive: true } } },
+          { shopCategory: categoryId },
+        ],
+      };
+    }
+  }
+
+  const allVendors: any[] = await prisma.vendor.findMany({
     where: {
       status: 'APPROVED',
       ...(districtId ? { districtId } : {}),
-      ...(categoryId ? { products: { some: { categoryId, status: 'PUBLISHED', isActive: true } } } : {}),
-    },
+      ...(categoryCondition.OR ? { OR: categoryCondition.OR } : {}),
+    } as any,
     select: {
       id: true, shopName: true, logoUrl: true, bannerUrl: true, rating: true, minOrderValue: true, address: true,
+      shopCategory: true,
       areaId: true, area: { select: { name: true, latitude: true, longitude: true } }, latitude: true, longitude: true, deliveryRadius: true,
       _count: { select: { products: { where: { status: 'PUBLISHED', isActive: true } } } }
-    },
+    } as any,
     orderBy: { rating: 'desc' },
-  });
+  }) as any[];
 
-  let processedVendors = allVendors.map(v => {
+  let processedVendors = allVendors.map((v: any) => {
     let distance: number | undefined;
     let inDeliveryRadius = true;
     const point = vendorLatLng(v);
     if (gps && point) {
       distance = calculateDistance(lat!, lng!, point.lat, point.lng);
-      inDeliveryRadius = distance <= v.deliveryRadius;
+      inDeliveryRadius = distance <= Number(v.deliveryRadius ?? 5);
     } else if (gps) {
       inDeliveryRadius = false;
     } else if (areaId && v.areaId !== areaId) {

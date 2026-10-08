@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  // provider = "sqlite"
-  provider = "sqlite"
+
+  provider = "postgres"
   url      = env("DATABASE_URL")
 }
 
@@ -70,6 +70,7 @@ model Vendor {
   email           String       @unique
   passwordHash    String
   shopName        String
+  shopCategory    String?
   code            String?      @unique
   slug            String       @unique
   description     String?

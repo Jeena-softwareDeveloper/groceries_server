@@ -83,6 +83,7 @@ export async function createVendor(data: { shopName: string, email: string, phon
   const vendor = await prisma.vendor.create({
     data: {
       ...vendorCreateData,
+      shopCategory: shopCategory || null,
       phone: normalizedPhone,
       passwordHash,
       slug,
@@ -182,7 +183,7 @@ export async function listVendors(status?: string, page = 1, limit = 20) {
     const req = item.customerId ? reqMap.get(item.customerId) : null;
     return {
       ...rest,
-      shopCategory: req?.shopCategory || null,
+      shopCategory: item.shopCategory || req?.shopCategory || null,
       ownerName: req?.ownerName || null,
       productsCount: _count?.products || 0,
       turnover
@@ -199,7 +200,7 @@ export async function getVendor(id: string) {
   });
   if (!vendor) throw new NotFoundError('Vendor not found');
 
-  let shopCategory = null;
+  let shopCategory = vendor.shopCategory || null;
   let ownerName = null;
   if (vendor.customerId) {
     const req = await prisma.vendorRequest.findFirst({
@@ -208,7 +209,7 @@ export async function getVendor(id: string) {
       select: { shopCategory: true, ownerName: true },
     });
     if (req) {
-      shopCategory = req.shopCategory;
+      if (!shopCategory) shopCategory = req.shopCategory;
       ownerName = req.ownerName;
     }
   }
@@ -233,7 +234,7 @@ export async function updateVendor(id: string, data: any) {
   };
 
   const updatableFields = [
-    'shopName', 'email', 'phone', 'description', 'address',
+    'shopName', 'shopCategory', 'email', 'phone', 'description', 'address',
     'areaId', 'districtId', 'deliveryRadius', 'minOrderValue',
     'gstNumber', 'fssaiNumber', 'bankHolderName',
     'bankAccountNo', 'bankIfsc', 'logoUrl', 'bannerUrl',
