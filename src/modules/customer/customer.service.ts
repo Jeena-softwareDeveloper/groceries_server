@@ -440,6 +440,25 @@ export async function listShops(districtIdInput?: string, areaId?: string, categ
 
       for (const token of dynamicTokens) {
         shopCategoryFilters.push({ shopCategory: { contains: token } });
+        shopCategoryFilters.push({ shopName: { contains: token } });
+        shopCategoryFilters.push({ description: { contains: token } });
+      }
+
+      // Also match vendors who registered under this category in VendorRequest (via customerId) even if they haven't uploaded products yet
+      const matchingRequests = await prisma.vendorRequest.findMany({
+        where: {
+          OR: [
+            { shopCategory: { in: allCatNames } },
+            { shopCategory: { in: allCatSlugs } },
+            ...Array.from(dynamicTokens).map((token) => ({ shopCategory: { contains: token } })),
+            ...Array.from(dynamicTokens).map((token) => ({ description: { contains: token } })),
+          ],
+        },
+        select: { customerId: true },
+      });
+      const matchingCustomerIds = matchingRequests.map((r) => r.customerId).filter(Boolean);
+      if (matchingCustomerIds.length > 0) {
+        shopCategoryFilters.push({ customerId: { in: matchingCustomerIds } });
       }
 
       categoryCondition = {
@@ -457,15 +476,8 @@ export async function listShops(districtIdInput?: string, areaId?: string, categ
               },
             },
           },
-          // 2. Vendor has matching shopCategory
+          // 2. Vendor belongs to category via shopCategory, shopName, description, or registration data
           ...shopCategoryFilters,
-          // 3. Newly added vendors with no published products
-          {
-            AND: [
-              { OR: [{ shopCategory: null }, { shopCategory: '' }] },
-              { products: { none: { status: { in: ['PUBLISHED', 'APPROVED'] }, isActive: true } } },
-            ],
-          },
         ],
       };
     } else {
@@ -514,12 +526,12 @@ export async function listShops(districtIdInput?: string, areaId?: string, categ
     orderBy: { rating: 'desc' },
   }) as any[];
 
-  // Fallback 1: If district filter produced 0 vendors, search all approved vendors matching the category
-  if (allVendors.length === 0 && districtId) {
+  // Fallback 1: If district filter produced 0 vendors, search vendors matching the category across any district
+  if (allVendors.length === 0 && districtId && categoryCondition.OR) {
     allVendors = await prisma.vendor.findMany({
       where: {
         status: 'APPROVED',
-        ...(categoryCondition.OR ? { OR: categoryCondition.OR } : {}),
+        OR: categoryCondition.OR,
       } as any,
       select: {
         id: true,
@@ -541,12 +553,11 @@ export async function listShops(districtIdInput?: string, areaId?: string, categ
     }) as any[];
   }
 
-  // Fallback 2: If category filter produced 0 vendors, show all approved vendors in the district
-  if (allVendors.length === 0) {
+  // Fallback 2: ONLY when NO category filter is applied and district produced 0 vendors, show all approved vendors
+  if (allVendors.length === 0 && !categoryId) {
     allVendors = await prisma.vendor.findMany({
       where: {
         status: 'APPROVED',
-        ...(districtId ? { districtId } : {}),
       } as any,
       select: {
         id: true,
@@ -566,30 +577,6 @@ export async function listShops(districtIdInput?: string, areaId?: string, categ
       } as any,
       orderBy: { rating: 'desc' },
     }) as any[];
-
-    // Fallback 3: Return all approved vendors across the platform
-    if (allVendors.length === 0) {
-      allVendors = await prisma.vendor.findMany({
-        where: { status: 'APPROVED' } as any,
-        select: {
-          id: true,
-          shopName: true,
-          logoUrl: true,
-          bannerUrl: true,
-          rating: true,
-          minOrderValue: true,
-          address: true,
-          shopCategory: true,
-          areaId: true,
-          area: { select: { name: true, latitude: true, longitude: true } },
-          latitude: true,
-          longitude: true,
-          deliveryRadius: true,
-          _count: { select: { products: { where: { status: { in: ['PUBLISHED', 'APPROVED'] }, isActive: true } } } },
-        } as any,
-        orderBy: { rating: 'desc' },
-      }) as any[];
-    }
   }
 
   let processedVendors = allVendors.map((v: any) => {
