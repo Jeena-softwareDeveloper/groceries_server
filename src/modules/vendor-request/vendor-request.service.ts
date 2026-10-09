@@ -73,6 +73,16 @@ export async function upsertDraft(customerId: string, data: Record<string, unkno
   ];
   restrictedFields.forEach(f => delete cleanData[f]);
 
+  // If cleanData doesn't have staffReferralCode, inherit from customer's staff relation
+  if (!cleanData.staffReferralCode) {
+    const customer = await prisma.customer.findUnique({
+      where: { id: customerId },
+      include: { referredByStaff: { select: { code: true } } }
+    });
+    if (customer?.referredByStaff?.code) {
+      cleanData.staffReferralCode = customer.referredByStaff.code;
+    }
+  }
 
   const existing = await prisma.vendorRequest.findFirst({
     where: { customerId, status: { in: ['DRAFT', 'MORE_INFO_REQUIRED'] } },
@@ -244,18 +254,31 @@ export async function approveRequest(id: string, adminId: string) {
 
   const vendorCode = `VND-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
-  // Resolve staffReferralCode → staffId FK
+  // Resolve staffReferralCode → staffId FK (check request first, then fallback to customer record)
+  let staffCode = req.staffReferralCode || null;
   let resolvedStaffId: string | null = null;
-  if (req.staffReferralCode) {
+  if (staffCode) {
     const foundStaff = await prisma.staff.findFirst({
       where: {
         OR: [
-          { code: req.staffReferralCode.trim().toUpperCase() },
-          { name: req.staffReferralCode.trim() },
+          { code: staffCode.trim().toUpperCase() },
+          { name: staffCode.trim() },
         ],
       },
     });
     resolvedStaffId = foundStaff?.id ?? null;
+  }
+
+  // Fallback to customer's linked staff if request had no referral code
+  if (!resolvedStaffId) {
+    const customer = await prisma.customer.findUnique({
+      where: { id: req.customerId },
+      include: { referredByStaff: { select: { id: true, code: true } } }
+    });
+    if (customer?.referredByStaff) {
+      resolvedStaffId = customer.referredByStaff.id;
+      staffCode = customer.referredByStaff.code;
+    }
   }
 
   // Run vendor create + request update atomically so we never get APPROVED request without a vendor record
@@ -290,7 +313,7 @@ export async function approveRequest(id: string, adminId: string) {
         status: 'APPROVED',
         approvedAt: new Date(),
         approvedBy: adminId,
-        staffReferralCode: req.staffReferralCode || null,
+        staffReferralCode: staffCode || null,
         staffId: resolvedStaffId,
       },
     });
@@ -302,11 +325,24 @@ export async function approveRequest(id: string, adminId: string) {
         reviewedBy: adminId,
         reviewedAt: new Date(),
         staffId: resolvedStaffId, // store resolved FK
+        staffReferralCode: staffCode || null,
       },
     });
 
     return { vendor: createdVendor };
   });
+
+  // Log audit event for the referring staff
+  if (resolvedStaffId) {
+    await prisma.staffAuditLog.create({
+      data: {
+        staffId: resolvedStaffId,
+        action: 'VENDOR_ONBOARDED',
+        platform: 'App',
+        metadata: JSON.stringify({ vendorId: vendor.id, shopName: vendor.shopName })
+      }
+    }).catch(() => {});
+  }
 
   // Notify the customer — never persist plaintext passwords in notifications
   await prisma.notification.create({

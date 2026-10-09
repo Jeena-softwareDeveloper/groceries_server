@@ -97,6 +97,17 @@ export async function createVendor(data: { shopName: string, email: string, phon
     }
   });
 
+  if (linkedStaffId) {
+    await prisma.staffAuditLog.create({
+      data: {
+        staffId: linkedStaffId,
+        action: 'VENDOR_ONBOARDED',
+        platform: 'Admin',
+        metadata: JSON.stringify({ vendorId: vendor.id, shopName: vendor.shopName })
+      }
+    }).catch(() => {});
+  }
+
   // Ensure linked VendorRequest exists and is marked APPROVED for the mobile app
   const existingRequest = await prisma.vendorRequest.findFirst({
     where: { customerId: customer.id },
