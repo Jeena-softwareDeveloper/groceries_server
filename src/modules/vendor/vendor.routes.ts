@@ -1,3 +1,4 @@
+import { prisma } from '../../lib/prisma.js';
 import { Router } from 'express';
 import { authenticate, authorize } from '../auth/auth.service.js';
 import { sendSuccess } from '../../utils/response.js';
@@ -132,6 +133,21 @@ vendorRoutes.patch('/notifications/:id/read', async (req, res, next) => {
 });
 vendorRoutes.post('/notifications/read-all', async (req, res, next) => {
   try { sendSuccess(res, await svc.markAllNotificationsRead(req.user!.sub)); } catch (e) { next(e); }
+});
+
+vendorRoutes.post('/push-token', async (req, res, next) => {
+  try {
+    const { token } = req.body;
+    if (!token) {
+      res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'token is required' }, data: null });
+      return;
+    }
+    await (prisma as any).vendor.update({
+      where: { id: req.user!.sub },
+      data: { pushToken: token },
+    }).catch(() => {});
+    sendSuccess(res, { registered: true });
+  } catch (e) { next(e); }
 });
 
 // ─── Offers ───────────────────────────────────────────────────────────────────

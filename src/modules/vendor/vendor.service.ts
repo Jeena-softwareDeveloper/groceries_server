@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma.js';
 import { cacheDel, cacheDelPattern } from '../../lib/redis.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../../utils/errors.js';
+import { notifyOrderStatusChanged } from '../notification/notification.service.js';
 
 const isPg = process.env.DATABASE_URL?.startsWith('postgres');
 const modeObj: any = isPg ? { mode: 'insensitive' } : {};
@@ -450,7 +451,7 @@ export async function updateOrderStatus(vendorId: string, orderId: string, statu
   }
 
   if (status === 'CANCELLED' || status === 'RETURNED') {
-    return prisma.$transaction(async (tx) => {
+    const res = await prisma.$transaction(async (tx) => {
       const fullOrder = await tx.order.findUnique({ where: { id: orderId }, include: { items: true } });
       if (fullOrder) {
         for (const item of fullOrder.items) {
@@ -468,15 +469,20 @@ export async function updateOrderStatus(vendorId: string, orderId: string, statu
         },
       });
     });
+    notifyOrderStatusChanged(res, status).catch((e) => console.error('[Notification Error]:', e));
+    return res;
   }
 
-  return prisma.order.update({
+  const updatedOrder = await prisma.order.update({
     where: { id: orderId },
     data: {
       status: status as 'PLACED' | 'CONFIRMED' | 'PACKED' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED' | 'RETURNED',
       ...(status === 'DELIVERED' ? { deliveredAt: new Date() } : {}),
     },
   });
+
+  notifyOrderStatusChanged(updatedOrder, status).catch((e) => console.error('[Notification Error]:', e));
+  return updatedOrder;
 }
 
 // ─── Customers ────────────────────────────────────────────────────────────────

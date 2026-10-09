@@ -43,6 +43,29 @@ customerRoutes.post('/location', async (req, res, next) => {
     sendSuccess(res, result);
   } catch (e) { next(e); }
 });
+customerRoutes.post('/push-token', async (req, res, next) => {
+  try {
+    const { token, deviceId } = req.body;
+    if (!token) {
+      res.status(400).json({ success: false, error: { code: 'BAD_REQUEST', message: 'token is required' }, data: null });
+      return;
+    }
+    const customerId = req.user?.role === 'CUSTOMER' ? req.user.sub : undefined;
+    if (customerId) {
+      await (prisma as any).customer.update({
+        where: { id: customerId },
+        data: { pushToken: token },
+      }).catch(() => {});
+    }
+    if (deviceId) {
+      await (prisma as any).deviceLocation.updateMany({
+        where: { deviceId },
+        data: { pushToken: token },
+      }).catch(() => {});
+    }
+    sendSuccess(res, { registered: true });
+  } catch (e) { next(e); }
+});
 customerRoutes.get('/reverse-geocode', async (req, res, next) => {
   try {
     const lat = req.query.lat ? parseFloat(req.query.lat as string) : undefined;

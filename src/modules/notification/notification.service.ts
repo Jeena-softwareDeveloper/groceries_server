@@ -10,6 +10,46 @@ export interface NotificationPayload {
   channels?: Array<'IN_APP' | 'EMAIL' | 'WHATSAPP' | 'PUSH'>;
 }
 
+/**
+ * Dispatches push notifications to Expo Push Service
+ */
+export async function sendExpoPushNotifications(
+  tokens: string[],
+  title: string,
+  body: string,
+  data?: Record<string, any>
+) {
+  const validTokens = [...new Set(tokens.filter((t) => typeof t === 'string' && t.trim().length > 0))];
+  if (validTokens.length === 0) return;
+
+  const messages = validTokens.map((token) => ({
+    to: token,
+    sound: 'default',
+    title,
+    body,
+    data: data || {},
+    priority: 'high',
+    channelId: 'default',
+  }));
+
+  try {
+    const res = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Accept-Encoding': 'gzip, deflate',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(messages),
+    });
+    const result = await res.json();
+    console.log(`[Push Notification] Dispatched to ${validTokens.length} device(s):`, JSON.stringify(result));
+    return result;
+  } catch (err) {
+    console.error('[Push Notification] Failed to send via Expo:', err);
+  }
+}
+
 export async function sendNotification(payload: NotificationPayload) {
   const { customerId, vendorId, type, title, body, data } = payload;
 
@@ -26,17 +66,55 @@ export async function sendNotification(payload: NotificationPayload) {
     },
   });
 
-  // 2. Multi-channel dispatching simulation/adapters
-  const channels = payload.channels || ['IN_APP', 'EMAIL', 'PUSH', 'WHATSAPP'];
-  
+  // 2. Multi-channel dispatching
+  const channels = payload.channels || ['IN_APP', 'PUSH'];
+
+  if (channels.includes('PUSH')) {
+    const pushTokens: string[] = [];
+
+    // Find customer push tokens
+    if (customerId) {
+      const customer = await (prisma as any).customer.findUnique({
+        where: { id: customerId },
+        select: { pushToken: true },
+      });
+      if (customer?.pushToken) pushTokens.push(customer.pushToken);
+
+      // Also check device locations associated with customer
+      const deviceLocations = await (prisma as any).deviceLocation.findMany({
+        where: { customerId, pushToken: { not: null } },
+        select: { pushToken: true },
+      });
+      for (const dl of deviceLocations) {
+        if (dl.pushToken) pushTokens.push(dl.pushToken);
+      }
+    }
+
+    // Find vendor push tokens
+    if (vendorId) {
+      const vendor = await (prisma as any).vendor.findUnique({
+        where: { id: vendorId },
+        select: { pushToken: true },
+      });
+      if (vendor?.pushToken) pushTokens.push(vendor.pushToken);
+    }
+
+    if (pushTokens.length > 0) {
+      await sendExpoPushNotifications(pushTokens, title, body, {
+        notificationId: notif.id,
+        type,
+        ...(data || {}),
+      });
+    } else {
+      console.log(`[Notification Engine - PUSH] No registered push tokens for ${customerId ? 'Customer ' + customerId : 'Vendor ' + vendorId}`);
+    }
+  }
+
   if (channels.includes('EMAIL')) {
-    console.log(`[Notification Engine - EMAIL] Sent to ${customerId ? 'Customer ' + customerId : 'Vendor ' + vendorId}: "${title}" - ${body}`);
+    console.log(`[Notification Engine - EMAIL] Sent: "${title}" - ${body}`);
   }
   if (channels.includes('WHATSAPP')) {
-    console.log(`[Notification Engine - WHATSAPP] Sent to ${customerId ? 'Customer ' + customerId : 'Vendor ' + vendorId}: "${title}" - ${body}`);
-  }
-  if (channels.includes('PUSH')) {
-    console.log(`[Notification Engine - PUSH] Sent to ${customerId ? 'Customer ' + customerId : 'Vendor ' + vendorId}: "${title}" - ${body}`);
+    console.log(`[Notification Engine - WHATSAPP] Sent: "${title}" - ${body}`);
   }
 
   return notif;
@@ -72,45 +150,65 @@ export async function notifyVendorProductRejected(vendorId: string, productName:
 }
 
 export async function notifyNewOrderPlaced(order: any) {
-  // Notify Customer
+  // 1. Notify Customer
   await sendNotification({
     customerId: order.customerId,
     type: 'ORDER_PLACED',
-    title: '🎉 Order Confirmed!',
-    body: `Your order #${order.orderNumber} has been placed successfully.`,
-    data: { orderId: order.id },
+    title: '🎉 Order Placed Successfully!',
+    body: `Your order #${order.orderNumber} for ₹${Number(order.grandTotal).toFixed(0)} has been placed. We will notify you once confirmed.`,
+    data: { orderId: order.id, orderNumber: order.orderNumber },
   });
 
-  // Notify Vendor
+  // 2. Notify Vendor
   await sendNotification({
     vendorId: order.vendorId,
     type: 'NEW_ORDER',
     title: '🔔 New Order Received!',
-    body: `You received a new order #${order.orderNumber} for ₹${order.grandTotal}. Please accept and pack it.`,
-    data: { orderId: order.id },
+    body: `You received a new order #${order.orderNumber} for ₹${Number(order.grandTotal).toFixed(0)}. Please accept and pack it.`,
+    data: { orderId: order.id, orderNumber: order.orderNumber },
   });
 }
 
 export async function notifyOrderStatusChanged(order: any, newStatus: string) {
-  const statusMessages: Record<string, string> = {
-    ACCEPTED: 'Your order has been accepted by the store.',
-    PREPARING: 'Your order is being prepared.',
-    PACKED: 'Your order has been packed and is ready for pickup.',
-    OUT_FOR_DELIVERY: 'Your order is out for delivery!',
-    DELIVERED: 'Your order has been delivered! Thank you for shopping with us.',
-    CANCELLED: 'Your order has been cancelled.',
-    RETURNED: 'Your order return has been processed.',
+  const statusConfig: Record<string, { title: string; message: string }> = {
+    CONFIRMED: {
+      title: '✅ Order Confirmed!',
+      message: `The store has confirmed your order #${order.orderNumber}. It is now being processed.`,
+    },
+    PACKED: {
+      title: '📦 Order Packed!',
+      message: `Your order #${order.orderNumber} has been packed and is ready for pickup/delivery.`,
+    },
+    OUT_FOR_DELIVERY: {
+      title: '🚀 Out for Delivery!',
+      message: `Your order #${order.orderNumber} is on the way to your delivery address!`,
+    },
+    DELIVERED: {
+      title: '🎉 Order Delivered!',
+      message: `Your order #${order.orderNumber} has been delivered. Thank you for shopping with us!`,
+    },
+    CANCELLED: {
+      title: '❌ Order Cancelled',
+      message: `Your order #${order.orderNumber} has been cancelled.`,
+    },
+    RETURNED: {
+      title: '↩️ Order Returned',
+      message: `Your order #${order.orderNumber} return has been processed.`,
+    },
   };
 
-  const message = statusMessages[newStatus] || `Your order status has been updated to ${newStatus}`;
+  const config = statusConfig[newStatus] || {
+    title: `Order #${order.orderNumber} Update`,
+    message: `Your order status has been updated to ${newStatus}.`,
+  };
 
   // Notify Customer
   await sendNotification({
     customerId: order.customerId,
     type: `ORDER_${newStatus}`,
-    title: `Order #${order.orderNumber} Update`,
-    body: message,
-    data: { orderId: order.id, status: newStatus },
+    title: config.title,
+    body: config.message,
+    data: { orderId: order.id, orderNumber: order.orderNumber, status: newStatus },
   });
 }
 

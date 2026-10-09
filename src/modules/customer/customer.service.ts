@@ -3,6 +3,7 @@ import { cacheGet, cacheSet, cacheDel, cacheDelPattern } from '../../lib/redis.j
 import { NotFoundError, ValidationError, ForbiddenError } from '../../utils/errors.js';
 import { env } from '../../config/env.js';
 import { randomBytes } from 'crypto';
+import { notifyNewOrderPlaced } from '../notification/notification.service.js';
 
 const memCartCoupons = new Map<string, string>();
 
@@ -1234,6 +1235,12 @@ export async function checkout(customerId: string, addressId: string, paymentMet
   });
 
   await cacheDelPattern('home:feed:*');
+
+  // Trigger push & in-app notifications for customer and vendor
+  for (const order of result.orders) {
+    notifyNewOrderPlaced(order).catch((e) => console.error('[Notification Error]:', e));
+  }
+
   return result;
 }
 // ─── Orders ────────────────────────────────────────────────────────────────────

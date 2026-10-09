@@ -3,6 +3,7 @@ import { prisma } from '../../../lib/prisma.js';
 import { sendSuccess } from '../../../utils/response.js';
 import { paramId } from '../../../utils/params.js';
 import { NotFoundError } from '../../../utils/errors.js';
+import { sendExpoPushNotifications } from '../../notification/notification.service.js';
 import type { Request, Response, NextFunction } from 'express';
 
 const isPg = process.env.DATABASE_URL?.startsWith('postgres');
@@ -252,7 +253,20 @@ notificationsAdminRoutes.post('/broadcast', async (req, res, next) => {
         data: districtId ? { districtId } : undefined,
       })),
     });
-    sendSuccess(res, { sent: customers.length });
+
+    // Also dispatch real push notification to all devices with push tokens
+    const tokens: string[] = [];
+    const [custWithTokens, devWithTokens] = await Promise.all([
+      (prisma as any).customer.findMany({ where: { pushToken: { not: null }, isBlocked: false }, select: { pushToken: true }, take: 1000 }),
+      (prisma as any).deviceLocation.findMany({ where: { pushToken: { not: null } }, select: { pushToken: true }, take: 1000 }),
+    ]);
+    for (const c of custWithTokens) if (c.pushToken) tokens.push(c.pushToken);
+    for (const d of devWithTokens) if (d.pushToken) tokens.push(d.pushToken);
+    if (tokens.length > 0) {
+      sendExpoPushNotifications(tokens, title, body, { type: 'BROADCAST' }).catch(() => {});
+    }
+
+    sendSuccess(res, { sent: customers.length, pushCount: tokens.length });
   } catch (e) { next(e); }
 });
 

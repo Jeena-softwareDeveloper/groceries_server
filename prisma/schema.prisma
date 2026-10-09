@@ -101,6 +101,7 @@ model Vendor {
   staffReferralCode String?
   staffId           String?
   referredByStaff   Staff?        @relation("StaffReferredVendors", fields: [staffId], references: [id], onDelete: SetNull)
+  pushToken         String?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
@@ -311,6 +312,7 @@ model Customer {
   currentLatitude  Float?
   currentLongitude Float?
   currentLocation  String?
+  pushToken        String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -343,6 +345,7 @@ model DeviceLocation {
   longitude   Float
   districtId  String?
   areaId      String?
+  pushToken   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

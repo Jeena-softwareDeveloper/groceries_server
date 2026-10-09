@@ -15,6 +15,7 @@ import {
 import { sendFast2SmsOtp } from '../../lib/sms.js';
 import { AppError, ForbiddenError, UnauthorizedError, ValidationError } from '../../utils/errors.js';
 import type { UserRole } from '../../types/index.js';
+import { sendNotification } from '../notification/notification.service.js';
 
 const SALT_ROUNDS = 12;
 
@@ -167,6 +168,13 @@ export async function verifyCustomerOtp(phone: string, otp: string, deviceName?:
         data: { staffId, action: 'CUSTOMER_ONBOARDED', platform: 'App' }
       }).catch(() => {}); // non-critical
     }
+
+    sendNotification({
+      customerId: customer.id,
+      type: 'WELCOME',
+      title: '👋 Welcome to All Time Market!',
+      body: 'Find fresh groceries and daily essentials from your favorite local shops with quick delivery!',
+    }).catch(() => {});
   }
 
   if (customer.isBlocked) throw new ForbiddenError('This account is suspended. Please contact support.');
