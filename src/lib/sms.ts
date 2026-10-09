@@ -68,7 +68,7 @@ export async function sendFast2SmsOtp(
       },
       body: JSON.stringify({
         route: 'q',
-        message: `${otp} is your OTP to login to your account. - All Time Market`,
+        message: `${otp} is your verification code for All Time Market.`,
         language: 'english',
         flash: 0,
         numbers: normalizedPhone,
