@@ -404,9 +404,17 @@ export async function listShops(districtIdInput?: string, areaId?: string, categ
 
   let categoryCondition: any = {};
   if (categoryId) {
-    const category = await prisma.category.findUnique({
-      where: { id: categoryId },
-      include: { children: { select: { id: true, name: true, slug: true } } },
+    const category = await prisma.category.findFirst({
+      where: {
+        OR: [
+          { id: categoryId },
+          { slug: categoryId },
+        ],
+      },
+      include: {
+        children: { select: { id: true, name: true, slug: true } },
+        parent: { select: { id: true, name: true, slug: true } },
+      },
     });
 
     if (category) {
@@ -415,18 +423,47 @@ export async function listShops(districtIdInput?: string, areaId?: string, categ
       const allCatNames = [category.name, ...children.map((c) => c.name)].filter(Boolean);
       const allCatSlugs = [category.slug, ...children.map((c) => c.slug)].filter(Boolean);
 
+      // Build dynamic shopCategory filters directly from the database category and its subcategories
+      const shopCategoryFilters: any[] = [
+        { shopCategory: { in: allCatNames } },
+        { shopCategory: { in: allCatSlugs } },
+        { shopCategory: category.id },
+      ];
+
+      // Dynamically extract words/tokens from database category names (length >= 3)
+      // so any partial match or variations work without hardcoding any specific category name
+      const dynamicTokens = new Set<string>();
+      allCatNames.forEach((catName) => {
+        const tokens = catName.split(/[\s&,/\\-]+/).map((t) => t.trim()).filter((t) => t.length >= 3);
+        tokens.forEach((t) => dynamicTokens.add(t));
+      });
+
+      for (const token of dynamicTokens) {
+        shopCategoryFilters.push({ shopCategory: { contains: token } });
+      }
+
       categoryCondition = {
         OR: [
-          // 1. Vendor has published products in this category or child subcategories
-          { products: { some: { categoryId: { in: allCatIds }, status: 'PUBLISHED', isActive: true } } },
-          // 2. Vendor has this category configured as shopCategory (name or slug)
-          { shopCategory: { in: allCatNames } },
-          { shopCategory: { in: allCatSlugs } },
-          // 3. Newly added vendors with no published products and no specific category assigned
+          // 1. Vendor has published or approved products in this category or child subcategories
+          {
+            products: {
+              some: {
+                OR: [
+                  { categoryId: { in: allCatIds } },
+                  { subCategoryId: { in: allCatIds } },
+                ],
+                status: { in: ['PUBLISHED', 'APPROVED'] },
+                isActive: true,
+              },
+            },
+          },
+          // 2. Vendor has matching shopCategory
+          ...shopCategoryFilters,
+          // 3. Newly added vendors with no published products
           {
             AND: [
               { OR: [{ shopCategory: null }, { shopCategory: '' }] },
-              { products: { none: { status: 'PUBLISHED', isActive: true } } },
+              { products: { none: { status: { in: ['PUBLISHED', 'APPROVED'] }, isActive: true } } },
             ],
           },
         ],
@@ -434,27 +471,126 @@ export async function listShops(districtIdInput?: string, areaId?: string, categ
     } else {
       categoryCondition = {
         OR: [
-          { products: { some: { categoryId, status: 'PUBLISHED', isActive: true } } },
+          {
+            products: {
+              some: {
+                OR: [
+                  { categoryId },
+                  { subCategoryId: categoryId },
+                ],
+                status: { in: ['PUBLISHED', 'APPROVED'] },
+                isActive: true,
+              },
+            },
+          },
           { shopCategory: categoryId },
         ],
       };
     }
   }
 
-  const allVendors: any[] = await prisma.vendor.findMany({
+  let allVendors: any[] = await prisma.vendor.findMany({
     where: {
       status: 'APPROVED',
       ...(districtId ? { districtId } : {}),
       ...(categoryCondition.OR ? { OR: categoryCondition.OR } : {}),
     } as any,
     select: {
-      id: true, shopName: true, logoUrl: true, bannerUrl: true, rating: true, minOrderValue: true, address: true,
+      id: true,
+      shopName: true,
+      logoUrl: true,
+      bannerUrl: true,
+      rating: true,
+      minOrderValue: true,
+      address: true,
       shopCategory: true,
-      areaId: true, area: { select: { name: true, latitude: true, longitude: true } }, latitude: true, longitude: true, deliveryRadius: true,
-      _count: { select: { products: { where: { status: 'PUBLISHED', isActive: true } } } }
+      areaId: true,
+      area: { select: { name: true, latitude: true, longitude: true } },
+      latitude: true,
+      longitude: true,
+      deliveryRadius: true,
+      _count: { select: { products: { where: { status: { in: ['PUBLISHED', 'APPROVED'] }, isActive: true } } } },
     } as any,
     orderBy: { rating: 'desc' },
   }) as any[];
+
+  // Fallback 1: If district filter produced 0 vendors, search all approved vendors matching the category
+  if (allVendors.length === 0 && districtId) {
+    allVendors = await prisma.vendor.findMany({
+      where: {
+        status: 'APPROVED',
+        ...(categoryCondition.OR ? { OR: categoryCondition.OR } : {}),
+      } as any,
+      select: {
+        id: true,
+        shopName: true,
+        logoUrl: true,
+        bannerUrl: true,
+        rating: true,
+        minOrderValue: true,
+        address: true,
+        shopCategory: true,
+        areaId: true,
+        area: { select: { name: true, latitude: true, longitude: true } },
+        latitude: true,
+        longitude: true,
+        deliveryRadius: true,
+        _count: { select: { products: { where: { status: { in: ['PUBLISHED', 'APPROVED'] }, isActive: true } } } },
+      } as any,
+      orderBy: { rating: 'desc' },
+    }) as any[];
+  }
+
+  // Fallback 2: If category filter produced 0 vendors, show all approved vendors in the district
+  if (allVendors.length === 0) {
+    allVendors = await prisma.vendor.findMany({
+      where: {
+        status: 'APPROVED',
+        ...(districtId ? { districtId } : {}),
+      } as any,
+      select: {
+        id: true,
+        shopName: true,
+        logoUrl: true,
+        bannerUrl: true,
+        rating: true,
+        minOrderValue: true,
+        address: true,
+        shopCategory: true,
+        areaId: true,
+        area: { select: { name: true, latitude: true, longitude: true } },
+        latitude: true,
+        longitude: true,
+        deliveryRadius: true,
+        _count: { select: { products: { where: { status: { in: ['PUBLISHED', 'APPROVED'] }, isActive: true } } } },
+      } as any,
+      orderBy: { rating: 'desc' },
+    }) as any[];
+
+    // Fallback 3: Return all approved vendors across the platform
+    if (allVendors.length === 0) {
+      allVendors = await prisma.vendor.findMany({
+        where: { status: 'APPROVED' } as any,
+        select: {
+          id: true,
+          shopName: true,
+          logoUrl: true,
+          bannerUrl: true,
+          rating: true,
+          minOrderValue: true,
+          address: true,
+          shopCategory: true,
+          areaId: true,
+          area: { select: { name: true, latitude: true, longitude: true } },
+          latitude: true,
+          longitude: true,
+          deliveryRadius: true,
+          _count: { select: { products: { where: { status: { in: ['PUBLISHED', 'APPROVED'] }, isActive: true } } } },
+        } as any,
+        orderBy: { rating: 'desc' },
+      }) as any[];
+    }
+  }
 
   let processedVendors = allVendors.map((v: any) => {
     let distance: number | undefined;
@@ -463,10 +599,6 @@ export async function listShops(districtIdInput?: string, areaId?: string, categ
     if (gps && point) {
       distance = calculateDistance(lat!, lng!, point.lat, point.lng);
       inDeliveryRadius = distance <= Number(v.deliveryRadius ?? 5);
-    } else if (gps) {
-      inDeliveryRadius = false;
-    } else if (areaId && v.areaId !== areaId) {
-      inDeliveryRadius = false;
     }
     return { ...v, distance, inDeliveryRadius };
   });
@@ -519,8 +651,37 @@ export async function getShop(vendorId: string, lat?: number, lng?: number) {
 }
 
 export async function getShopProducts(vendorId: string, categoryId?: string) {
+  let categoryFilter: any = {};
+  if (categoryId) {
+    const category = await prisma.category.findFirst({
+      where: { OR: [{ id: categoryId }, { slug: categoryId }] },
+      include: { children: { select: { id: true } } },
+    });
+    if (category) {
+      const allCatIds = [category.id, ...(category.children || []).map((c) => c.id)];
+      categoryFilter = {
+        OR: [
+          { categoryId: { in: allCatIds } },
+          { subCategoryId: { in: allCatIds } },
+        ],
+      };
+    } else {
+      categoryFilter = {
+        OR: [
+          { categoryId },
+          { subCategoryId: categoryId },
+        ],
+      };
+    }
+  }
+
   return prisma.product.findMany({
-    where: { vendorId, status: 'PUBLISHED', isActive: true, ...(categoryId ? { categoryId } : {}) },
+    where: {
+      vendorId,
+      status: { in: ['PUBLISHED', 'APPROVED'] },
+      isActive: true,
+      ...categoryFilter,
+    },
     select: {
       id: true,
       name: true,
@@ -530,7 +691,7 @@ export async function getShopProducts(vendorId: string, categoryId?: string) {
       weight: true,
       images: { take: 1, select: { url: true } },
       inventory: { select: { stock: true } },
-      category: { select: { name: true } }
+      category: { select: { name: true } },
     },
     orderBy: { name: 'asc' },
   });
@@ -608,15 +769,39 @@ export async function listProducts(categoryId?: string, districtIdInput?: string
     vendorRadiusMap = maps.radiusMap;
   }
 
+  let categoryFilter: any = {};
+  if (categoryId) {
+    const category = await prisma.category.findFirst({
+      where: { OR: [{ id: categoryId }, { slug: categoryId }] },
+      include: { children: { select: { id: true } } },
+    });
+    if (category) {
+      const allCatIds = [category.id, ...(category.children || []).map((c) => c.id)];
+      categoryFilter = {
+        OR: [
+          { categoryId: { in: allCatIds } },
+          { subCategoryId: { in: allCatIds } },
+        ],
+      };
+    } else {
+      categoryFilter = {
+        OR: [
+          { categoryId },
+          { subCategoryId: categoryId },
+        ],
+      };
+    }
+  }
+
   const where: any = {
-    status: 'PUBLISHED',
+    status: { in: ['PUBLISHED', 'APPROVED'] },
     isActive: true,
     ...(districtId
       ? { vendor: { districtId, status: 'APPROVED' } }
       : hasCoords(lat, lng)
         ? { vendor: { status: 'APPROVED' } }
         : {}),
-    ...(categoryId ? { categoryId } : {}),
+    ...categoryFilter,
   };
 
   const [rawProducts, total] = await Promise.all([
